@@ -31,7 +31,17 @@ WPF project skeleton with initial configuration, logging, and local SQLite boots
     - Loads configuration
     - Initializes `AppLogger`
     - Runs `SqliteBootstrap.InitializeDatabase()`
-    - Writes simple startup log messages
+    - Composes core services (auth, vault, backup engine, settings)
+    - Logs detailed startup milestones (config, logger, database, services, auth flow, main window)
+    - Wraps startup in a top-level try/catch to log fatal errors and show a simple MessageBox with the exception type and message
+    - Uses explicit `ShutdownMode` control so the app stays alive during modal auth dialogs and shuts down explicitly on auth failure/cancel or when the main window closes
+  - `FirstUserSetupWindow` (in `FirstUserSetupWindow.xaml.cs`)
+    - Constructor accepts `AuthService`, `AppState`, and `AppLogger`
+    - `Create_Click` validates input, prevents double-submit with a simple `_isCreating` flag and disables the Create button during processing
+    - On success: calls `AuthService.RegisterUser` then `AuthService.Login`, sets `AppState.CurrentSession`, sets `DialogResult = true`, and closes the window
+    - On duplicate username: shows a beginner-friendly message advising to log in or choose another username
+    - If registration succeeds but automatic login fails: shows a clear message, logs the issue, and closes the window so startup exits cleanly
+    - On unexpected exceptions: logs the full exception details and shows a simple error message without exposing internal details
 
 - Security:
   - `PasswordHashOptions`
@@ -93,10 +103,16 @@ WPF project skeleton with initial configuration, logging, and local SQLite boots
     - `Task SaveAsync(BackupJobManifest manifest, string manifestPath, CancellationToken ct)` writes manifest JSON
     - `Task<BackupJobManifest> LoadAsync(string manifestPath, CancellationToken ct)` reads manifest JSON
   - `BundleEncryptor`
-    - `Task<BackupJobManifest> EncryptAsync(BackupJobEncryptRequest request, CancellationToken ct)` scans files, plans bundles, and writes chunked AES-GCM bundle files + manifest
+    - `Task<BackupJobManifest> EncryptAsync(BackupJobEncryptRequest request, IProgress<BackupProgress>? progress = null, CancellationToken ct = default)` scans files, plans bundles, writes chunked AES-GCM bundle files + manifest, and optionally reports byte-based progress across bundles
   - `BundleDecryptor`
-    - `Task DecryptAsync(BackupJobDecryptRequest request, CancellationToken ct)` reads manifest and restores original folder/file structure from bundles
+    - `Task DecryptAsync(BackupJobDecryptRequest request, IProgress<BackupProgress>? progress = null, CancellationToken ct = default)` reads manifest and restores original folder/file structure from bundles, optionally reporting byte-based progress across bundles
+  - `BackupProgress`
+    - Simple model carrying `Phase`, `ProcessedBytes`, `TotalBytes`, `PercentComplete`, `CurrentBundleIndex`, `TotalBundles`, and optional `CurrentItemName` for UI progress display
 - Services:
+  - `AuthService`
+    - `RegisterUser(string username, string password, string? recoveryEmail)` creates a new local user, hashes the password with Argon2id, generates and wraps a VaultMasterKey, and stores all fields in the `Users` table.
+    - `Login(string username, string password)` looks up the user by username, verifies the password using the stored Argon2id hash, derives the wrapping key, unwraps the VaultMasterKey, and returns a `UserSession` on success. Logs each step of the login flow; returns `null` for bad credentials and throws `LoginInternalException` for post-verification internal failures.
+    - `LoginInternalException` is a nested exception type used to signal that credentials were valid but an internal error occurred after verification (for example, during VMK unwrap or session creation). This allows the UI to show a different message than for bad credentials.
   - `VaultService`
     - `GetOrCreateRootKey(UserSession session, string rootPath)` creates or retrieves a `RootKeyRecord` for a backup root
     - `byte[] UnwrapRootKey(RootKeyRecord record, UserSession session)` unwraps and returns the RootKey using the session's VaultMasterKey

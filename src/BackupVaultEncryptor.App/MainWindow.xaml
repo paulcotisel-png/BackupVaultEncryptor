@@ -5,13 +5,79 @@
     <Grid>
         <TabControl>
             <TabItem Header="Main">
-                <TextBlock Text="Main Tab Content" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Mode selector -->
+                    <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,5,5" VerticalAlignment="Center" Text="Mode:" />
+                    <ComboBox x:Name="ModeComboBox" Grid.Row="0" Grid.Column="1" Margin="0,0,0,5" SelectedIndex="0" SelectionChanged="ModeComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Encrypt" />
+                        <ComboBoxItem Content="Decrypt" />
+                    </ComboBox>
+
+                    <!-- Source -->
+                    <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,5,5" VerticalAlignment="Center" Text="Source:" />
+                    <TextBox x:Name="SourceTextBox" Grid.Row="1" Grid.Column="1" Margin="0,0,5,5" />
+                    <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal">
+                        <Button x:Name="BrowseSourceFolderButton" Content="Folder..." Margin="0,0,5,0" Click="BrowseSourceFolder_Click" />
+                        <Button x:Name="BrowseSourceFileButton" Content="File..." Click="BrowseSourceFile_Click" />
+                    </StackPanel>
+
+                    <!-- Destination -->
+                    <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,5,5" VerticalAlignment="Center" Text="Destination:" />
+                    <TextBox x:Name="DestinationTextBox" Grid.Row="2" Grid.Column="1" Margin="0,0,5,5" />
+                    <Button x:Name="BrowseDestinationButton" Grid.Row="2" Grid.Column="2" Content="Browse..." Click="BrowseDestination_Click" />
+
+                    <!-- Status and start -->
+                    <TextBlock x:Name="StatusTextBlock" Grid.Row="3" Grid.ColumnSpan="3" Margin="0,5,0,5" TextWrapping="Wrap" />
+                    <StackPanel Grid.Row="4" Grid.ColumnSpan="3" Orientation="Horizontal" VerticalAlignment="Top">
+                        <ProgressBar x:Name="JobProgressBar" Width="200" Height="20" IsIndeterminate="False" Visibility="Collapsed" Margin="0,0,10,0" />
+                        <Button x:Name="StartButton" Content="Start" Width="80" Click="StartButton_Click" />
+                    </StackPanel>
+                </Grid>
             </TabItem>
             <TabItem Header="Settings">
-                <TextBlock Text="Settings Tab Content" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,5,5" VerticalAlignment="Center" Text="Bundle size (GiB):" />
+                    <TextBox x:Name="BundleSizeGiBTextBox" Grid.Row="0" Grid.Column="1" Margin="0,0,0,5" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,5,5" VerticalAlignment="Center" Text="Chunk size (MiB):" />
+                    <TextBox x:Name="ChunkSizeMiBTextBox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,5" />
+
+                    <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                        <Button x:Name="SaveSettingsButton" Content="Save" Width="80" Click="SaveSettingsButton_Click" />
+                    </StackPanel>
+                </Grid>
             </TabItem>
             <TabItem Header="Logs">
-                <TextBlock Text="Logs Tab Content" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <ListBox x:Name="LogsListBox" />
+                </Grid>
             </TabItem>
         </TabControl>
     </Grid>

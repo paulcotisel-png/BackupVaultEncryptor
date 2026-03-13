@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using BackupVaultEncryptor.App.Core.BackupEngine;
 using BackupVaultEncryptor.App.Core.Models;
 using BackupVaultEncryptor.App.Logging;
 using BackupVaultEncryptor.App.Services;
@@ -32,7 +32,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             _logger = logger;
         }
 
-        public async Task<BackupJobManifest> EncryptAsync(BackupJobEncryptRequest request, CancellationToken cancellationToken = default)
+        public async Task<BackupJobManifest> EncryptAsync(BackupJobEncryptRequest request, IProgress<BackupProgress>? progress = null, CancellationToken cancellationToken = default)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
@@ -62,22 +62,79 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
 
             try
             {
-                var files = _fileScanner.ScanFiles(request.SourceRoot);
+                IEnumerable<FileEntry> files;
+                if (request.IncludedFullPaths is null)
+                {
+                    files = _fileScanner.ScanFiles(request.SourceRoot);
+                }
+                else
+                {
+                    files = _fileScanner.ScanFiles(request.SourceRoot, request.IncludedFullPaths);
+                }
                 var plannedBundles = _bundlePlanner.PlanBundles(files, request.TargetBundleSizeBytes);
+                var bundleList = new List<PlannedBundle>(plannedBundles);
 
-                foreach (var plannedBundle in plannedBundles)
+                var totalBytes = 0L;
+                foreach (var plannedBundle in bundleList)
+                {
+                    totalBytes += plannedBundle.TotalPlaintextBytes;
+                }
+
+                var totalBundles = bundleList.Count;
+
+                // When resuming, treat bundles that are already fully completed as processed so far.
+                long processedBytes = 0;
+                foreach (var plannedBundle in bundleList)
+                {
+                    if (IsBundleCompleted(manifest, request.DestinationRoot, plannedBundle))
+                    {
+                        processedBytes += plannedBundle.TotalPlaintextBytes;
+                    }
+                }
+
+                var bundleIndex = 0;
+                foreach (var plannedBundle in bundleList)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // Skip bundles that are already present and recorded as completed.
                     if (IsBundleCompleted(manifest, request.DestinationRoot, plannedBundle))
                     {
+                        bundleIndex++;
                         continue;
                     }
 
-                    var bundleInfo = await EncryptBundleAsync(request, rootKey, plannedBundle, cancellationToken).ConfigureAwait(false);
+                    var currentBundleIndex = bundleIndex + 1;
+
+                    // Report a snapshot before starting the bundle, if totals are known.
+                    if (totalBytes > 0 && progress != null)
+                    {
+                        progress.Report(new BackupProgress
+                        {
+                            Phase = "Encrypting",
+                            ProcessedBytes = processedBytes,
+                            TotalBytes = totalBytes,
+                            CurrentBundleIndex = currentBundleIndex,
+                            TotalBundles = totalBundles,
+                            CurrentItemName = $"bundle_{plannedBundle.BundleIndex:D4}"
+                        });
+                    }
+
+                    var bundleInfo = await EncryptBundleAsync(
+                        request,
+                        rootKey,
+                        plannedBundle,
+                        totalBytes,
+                        processedBytes,
+                        currentBundleIndex,
+                        totalBundles,
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
                     manifest.Bundles.Add(bundleInfo);
                     await _manifestStorage.SaveAsync(manifest, manifestPath, cancellationToken).ConfigureAwait(false);
+
+                    processedBytes += plannedBundle.TotalPlaintextBytes;
+                    bundleIndex++;
                 }
 
                 manifest.Status = "Completed";
@@ -118,7 +175,16 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             return false;
         }
 
-        private async Task<BackupBundleInfo> EncryptBundleAsync(BackupJobEncryptRequest request, byte[] rootKey, PlannedBundle plannedBundle, CancellationToken cancellationToken)
+        private async Task<BackupBundleInfo> EncryptBundleAsync(
+            BackupJobEncryptRequest request,
+            byte[] rootKey,
+            PlannedBundle plannedBundle,
+            long totalBytes,
+            long processedBytesBase,
+            int currentBundleIndex,
+            int totalBundles,
+            IProgress<BackupProgress>? progress,
+            CancellationToken cancellationToken)
         {
             var bundleKey = BundleKeyDerivation.DeriveBundleKey(rootKey, request.JobId, plannedBundle.BundleIndex);
 
@@ -154,6 +220,8 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                     var tagBuffer = new byte[16];
                     var chunkCounter = 0;
 
+                    long bundleProcessed = 0;
+
                     foreach (var entry in plannedBundle.Entries)
                     {
                         var manifestEntry = new BackupBundleEntry
@@ -184,6 +252,23 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                             await stream.WriteAsync(lengthBytes, 0, lengthBytes.Length, cancellationToken).ConfigureAwait(false);
                             await stream.WriteAsync(ciphertextBuffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
                             await stream.WriteAsync(tagBuffer, 0, tagBuffer.Length, cancellationToken).ConfigureAwait(false);
+
+                            bundleProcessed += bytesRead;
+
+                            if (totalBytes > 0 && progress != null)
+                            {
+                                var currentProcessed = processedBytesBase + bundleProcessed;
+
+                                progress.Report(new BackupProgress
+                                {
+                                    Phase = "Encrypting",
+                                    ProcessedBytes = currentProcessed,
+                                    TotalBytes = totalBytes,
+                                    CurrentBundleIndex = currentBundleIndex,
+                                    TotalBundles = totalBundles,
+                                    CurrentItemName = entry.File.RelativePath
+                                });
+                            }
 
                             chunkCounter++;
                         }
@@ -254,5 +339,11 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
         public long TargetBundleSizeBytes { get; set; }
         public int ChunkSizeBytes { get; set; }
         public UserSession UserSession { get; set; } = null!;
+        /// <summary>
+        /// Optional list of full file paths to include. When null, all files
+        /// under SourceRoot are included. Used to support single-file sources
+        /// without changing the overall engine design.
+        /// </summary>
+        public IEnumerable<string>? IncludedFullPaths { get; set; }
     }
 }

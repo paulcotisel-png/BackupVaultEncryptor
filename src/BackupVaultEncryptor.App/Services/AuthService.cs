@@ -95,32 +95,73 @@ namespace BackupVaultEncryptor.App.Services
 
         public UserSession? Login(string username, string password)
         {
+            _logger.Log($"Login attempt started for username '{username}'.");
+
             var user = _userRepository.GetByUsername(username);
             if (user == null)
             {
+                _logger.Log($"Login user lookup: user '{username}' not found.");
                 return null;
             }
 
             if (!_passwordHasher.VerifyPassword(password, user.PasswordHash))
             {
+                _logger.Log($"Login password verification FAILED for user Id {user.Id}.");
                 return null;
             }
 
-            // Derive wrapping key and unwrap the VaultMasterKey.
-            var passwordDerivedKey = _passwordKeyDeriver.DeriveKey(password, user.KeyWrapSalt, 32, VaultMasterKeyWrapPurpose);
+            _logger.Log($"Login password verification passed for user Id {user.Id}.");
 
-            var wrapped = new Security.WrappedKeyData(
-                user.VaultMasterKeyWrappedCiphertext,
-                user.VaultMasterKeyWrappedNonce,
-                user.VaultMasterKeyWrappedTag);
+            byte[]? passwordDerivedKey = null;
 
-            var vaultMasterKey = _keyWrapService.UnwrapWithKey(wrapped, passwordDerivedKey);
+            try
+            {
+                _logger.Log($"Login VMK unwrap starting for user Id {user.Id}.");
 
-            CryptographicOperations.ZeroMemory(passwordDerivedKey);
+                // Derive wrapping key and unwrap the VaultMasterKey.
+                passwordDerivedKey = _passwordKeyDeriver.DeriveKey(password, user.KeyWrapSalt, 32, VaultMasterKeyWrapPurpose);
 
-            _logger.Log($"User '{username}' logged in.");
+                var wrapped = new Security.WrappedKeyData(
+                    user.VaultMasterKeyWrappedCiphertext,
+                    user.VaultMasterKeyWrappedNonce,
+                    user.VaultMasterKeyWrappedTag);
 
-            return new UserSession(user.Id, user.Username, vaultMasterKey);
+                var vaultMasterKey = _keyWrapService.UnwrapWithKey(wrapped, passwordDerivedKey);
+
+                _logger.Log($"Login VMK unwrap succeeded for user Id {user.Id}.");
+
+                var session = new UserSession(user.Id, user.Username, vaultMasterKey);
+
+                _logger.Log($"Login session created for user Id {user.Id}.");
+
+                return session;
+            }
+            catch (Exception ex)
+            {
+                _logger.Log($"Login internal failure after password verification for user Id {user.Id}: {ex.GetType().Name}: {ex.Message}");
+                throw new LoginInternalException("Login could not be completed due to an internal error.", ex);
+            }
+            finally
+            {
+                if (passwordDerivedKey != null)
+                {
+                    CryptographicOperations.ZeroMemory(passwordDerivedKey);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Represents an internal failure that occurred after credentials were verified
+        /// (for example, while unwrapping the VaultMasterKey or creating the session).
+        /// This allows the UI layer to distinguish between bad credentials and
+        /// post-verification internal errors without exposing low-level details.
+        /// </summary>
+        public class LoginInternalException : Exception
+        {
+            public LoginInternalException(string message, Exception innerException)
+                : base(message, innerException)
+            {
+            }
         }
 
         public void ChangePassword(int userId, string oldPassword, string newPassword)

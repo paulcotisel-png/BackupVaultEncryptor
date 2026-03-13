@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,7 +28,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             _logger = logger;
         }
 
-        public async Task DecryptAsync(BackupJobDecryptRequest request, CancellationToken cancellationToken = default)
+        public async Task DecryptAsync(BackupJobDecryptRequest request, IProgress<BackupProgress>? progress = null, CancellationToken cancellationToken = default)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
@@ -38,10 +39,45 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
 
             try
             {
-                foreach (var bundle in manifest.Bundles)
+                var totalBytes = manifest.Bundles.Sum(b => b.TotalPlaintextBytes);
+                var totalBundles = manifest.Bundles.Count;
+
+                // When resuming in the future, completed bundles could be counted here.
+                long processedBytes = 0;
+
+                for (var i = 0; i < manifest.Bundles.Count; i++)
                 {
+                    var bundle = manifest.Bundles[i];
                     cancellationToken.ThrowIfCancellationRequested();
-                    await DecryptBundleAsync(manifest.JobId, bundle, rootKey, Path.GetDirectoryName(request.ManifestPath) ?? string.Empty, request.DestinationRoot, cancellationToken).ConfigureAwait(false);
+                    var currentBundleIndex = i + 1;
+
+                    if (totalBytes > 0 && progress != null)
+                    {
+                        progress.Report(new BackupProgress
+                        {
+                            Phase = "Decrypting",
+                            ProcessedBytes = processedBytes,
+                            TotalBytes = totalBytes,
+                            CurrentBundleIndex = currentBundleIndex,
+                            TotalBundles = totalBundles,
+                            CurrentItemName = bundle.BundleFileName
+                        });
+                    }
+
+                    await DecryptBundleAsync(
+                        manifest.JobId,
+                        bundle,
+                        rootKey,
+                        Path.GetDirectoryName(request.ManifestPath) ?? string.Empty,
+                        request.DestinationRoot,
+                        totalBytes,
+                        processedBytes,
+                        currentBundleIndex,
+                        totalBundles,
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
+
+                    processedBytes += bundle.TotalPlaintextBytes;
                 }
             }
             finally
@@ -50,7 +86,18 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             }
         }
 
-        private async Task DecryptBundleAsync(string jobId, BackupBundleInfo bundle, byte[] rootKey, string manifestDirectory, string destinationRoot, CancellationToken cancellationToken)
+        private async Task DecryptBundleAsync(
+            string jobId,
+            BackupBundleInfo bundle,
+            byte[] rootKey,
+            string manifestDirectory,
+            string destinationRoot,
+            long totalBytes,
+            long processedBytesBase,
+            int currentBundleIndex,
+            int totalBundles,
+            IProgress<BackupProgress>? progress,
+            CancellationToken cancellationToken)
         {
             var bundleKey = BundleKeyDerivation.DeriveBundleKey(rootKey, jobId, bundle.BundleIndex);
 
@@ -81,6 +128,8 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                 var tagBuffer = new byte[16];
                 var lengthBytes = new byte[4];
                 var chunkCounter = 0;
+
+                long bundleProcessed = 0;
 
                 // Prepare file writers keyed by relative path
                 var entryMap = new Dictionary<string, (BackupBundleEntry Entry, FileStream Stream)>();
@@ -132,6 +181,23 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
 
                         // Determine which entries this plaintext chunk contributes to
                         WritePlaintextToFiles(bundle, destinationRoot, plaintextBuffer, plaintextLength, entryMap);
+
+                        bundleProcessed += plaintextLength;
+
+                        if (totalBytes > 0 && progress != null)
+                        {
+                            var currentProcessed = processedBytesBase + bundleProcessed;
+
+                            progress.Report(new BackupProgress
+                            {
+                                Phase = "Decrypting",
+                                ProcessedBytes = currentProcessed,
+                                TotalBytes = totalBytes,
+                                CurrentBundleIndex = currentBundleIndex,
+                                TotalBundles = totalBundles,
+                                CurrentItemName = bundle.BundleFileName
+                            });
+                        }
 
                         chunkCounter++;
                     }

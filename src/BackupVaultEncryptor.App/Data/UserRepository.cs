@@ -46,6 +46,18 @@ namespace BackupVaultEncryptor.App.Data
             return new SqliteConnection($"Data Source={databasePath}");
         }
 
+        public bool AnyUsers()
+        {
+            using var connection = CreateConnection();
+            connection.Open();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1 FROM Users LIMIT 1";
+
+            using var reader = command.ExecuteReader();
+            return reader.Read();
+        }
+
         public UserAccount? GetByUsername(string username)
         {
             using var connection = CreateConnection();

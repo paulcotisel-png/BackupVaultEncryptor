@@ -72,7 +72,8 @@ namespace BackupVaultEncryptor.App.Security
         private static int ParseIntPart(string part, char key)
         {
             // part example: "m=65536"
-            var pieces = part.Split('=');
+            // Split only on the first '=' so values are free to contain '=' characters in the future.
+            var pieces = part.Split(new[] { '=' }, 2);
             if (pieces.Length != 2 || pieces[0].Length != 1 || pieces[0][0] != key)
             {
                 throw new FormatException($"Invalid encoded hash segment '{part}' for '{key}'.");
@@ -83,7 +84,9 @@ namespace BackupVaultEncryptor.App.Security
 
         private static string ParseStringPart(string part, char key)
         {
-            var pieces = part.Split('=');
+            // Base64 values (for salt and hash) may contain '=' padding characters.
+            // We therefore split only on the first '=' and treat the remainder as the full value.
+            var pieces = part.Split(new[] { '=' }, 2);
             if (pieces.Length != 2 || pieces[0].Length != 1 || pieces[0][0] != key)
             {
                 throw new FormatException($"Invalid encoded hash segment '{part}' for '{key}'.");

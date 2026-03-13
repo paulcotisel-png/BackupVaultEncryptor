@@ -24,6 +24,9 @@ public partial class MainWindow : Window
     private readonly UserSettingsStore _settingsStore;
 
     private bool _isJobRunning;
+    private string? _lastProgressPhase;
+
+    private const int MainLogMaxLines = 200;
 
     public MainWindow(AppState appState, BundleEncryptor encryptor, BundleDecryptor decryptor, AppLogger logger, UserSettingsStore settingsStore)
     {
@@ -47,9 +50,6 @@ public partial class MainWindow : Window
 
         BundleSizeGiBTextBox.Text = bundleGiB.ToString("0.##", CultureInfo.InvariantCulture);
         ChunkSizeMiBTextBox.Text = chunkMiB.ToString("0.##", CultureInfo.InvariantCulture);
-
-        // Wire logs list to recent entries
-        LogsListBox.ItemsSource = _logger.RecentEntries;
 
         UpdateModeUi();
     }
@@ -191,6 +191,7 @@ public partial class MainWindow : Window
         var jobOutputRoot = destinationRoot;
 
         SetJobRunningState(true, "Scanning and planning...");
+        AppendMainLogLine($"[Encrypt] Job {jobId} started. Source: {sourcePath}, Destination: {destinationRoot}");
 
         try
         {
@@ -210,12 +211,14 @@ public partial class MainWindow : Window
             await _encryptor.EncryptAsync(request, progress);
 
             StatusTextBlock.Text = "Encryption completed successfully.";
+            AppendMainLogLine($"[Encrypt] Job {jobId} completed successfully.");
         }
         catch (Exception ex)
         {
             StatusTextBlock.Text = $"Encryption failed: {ex.Message}";
             _logger.Log($"Encryption failed: {ex}");
-            MessageBox.Show(this, "Encryption failed. See logs tab for details.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppendMainLogLine($"[Encrypt] Job {jobId} failed: {ex.Message}");
+            MessageBox.Show(this, "Encryption failed. See log output for details.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -226,6 +229,7 @@ public partial class MainWindow : Window
     private async Task RunDecryptAsync(string manifestPath, string destinationRoot)
     {
         SetJobRunningState(true, "Decrypting...");
+        AppendMainLogLine($"[Decrypt] Started. Manifest: {manifestPath}, Destination: {destinationRoot}");
 
         try
         {
@@ -241,12 +245,14 @@ public partial class MainWindow : Window
             await _decryptor.DecryptAsync(request, progress);
 
             StatusTextBlock.Text = "Decryption completed successfully.";
+            AppendMainLogLine("[Decrypt] Completed successfully.");
         }
         catch (Exception ex)
         {
             StatusTextBlock.Text = $"Decryption failed: {ex.Message}";
             _logger.Log($"Decryption failed: {ex}");
-            MessageBox.Show(this, "Decryption failed. See logs tab for details.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppendMainLogLine($"[Decrypt] Failed: {ex.Message}");
+            MessageBox.Show(this, "Decryption failed. See log output for details.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -305,6 +311,10 @@ public partial class MainWindow : Window
     private void SetJobRunningState(bool isRunning, string? status)
     {
         _isJobRunning = isRunning;
+        if (isRunning)
+        {
+            _lastProgressPhase = null;
+        }
 
         StartButton.IsEnabled = !isRunning;
         BrowseSourceFolderButton.IsEnabled = !isRunning && IsEncryptMode();
@@ -364,6 +374,23 @@ public partial class MainWindow : Window
                 : $" - {progress.CurrentItemName}";
 
             StatusTextBlock.Text = $"{progress.Phase}: {percent:0.0}%{bundleInfo}{itemInfo}";
+
+            if (!string.IsNullOrEmpty(progress.Phase) && progress.Phase != _lastProgressPhase)
+            {
+                _lastProgressPhase = progress.Phase;
+
+                string phaseInfo;
+                if (progress.TotalBundles > 0)
+                {
+                    phaseInfo = $"{progress.Phase} (bundle {progress.CurrentBundleIndex} of {progress.TotalBundles})";
+                }
+                else
+                {
+                    phaseInfo = progress.Phase;
+                }
+
+                AppendMainLogLine($"[Progress] {phaseInfo}");
+            }
         });
     }
 
@@ -382,13 +409,61 @@ public partial class MainWindow : Window
         if (IsEncryptMode())
         {
             BrowseSourceFolderButton.IsEnabled = true;
-            BrowseSourceFileButton.Content = "File...";
+            BrowseSourceFileButton.Content = "File";
         }
         else
         {
             // Decrypt mode: source should be a manifest file, so folder browse is not useful.
             BrowseSourceFolderButton.IsEnabled = false;
-            BrowseSourceFileButton.Content = "Manifest...";
+            BrowseSourceFileButton.Content = "Manifest";
         }
+    }
+
+    private void AppendMainLogLine(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        void Append()
+        {
+            if (MainLogTextBox.Text.Length > 0)
+            {
+                MainLogTextBox.AppendText(Environment.NewLine);
+            }
+
+            MainLogTextBox.AppendText(message);
+            TrimMainLogLines();
+            MainLogTextBox.ScrollToEnd();
+        }
+
+        if (Dispatcher.CheckAccess())
+        {
+            Append();
+        }
+        else
+        {
+            Dispatcher.Invoke(Append);
+        }
+    }
+
+    private void TrimMainLogLines()
+    {
+        var text = MainLogTextBox.Text;
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        if (lines.Length <= MainLogMaxLines)
+        {
+            return;
+        }
+
+        var startIndex = lines.Length - MainLogMaxLines;
+        var trimmed = string.Join(Environment.NewLine, lines, startIndex, MainLogMaxLines);
+        MainLogTextBox.Text = trimmed;
     }
 }

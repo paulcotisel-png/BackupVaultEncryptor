@@ -11,6 +11,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
@@ -30,14 +31,14 @@
                     <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,5,5" VerticalAlignment="Center" Text="Source:" />
                     <TextBox x:Name="SourceTextBox" Grid.Row="1" Grid.Column="1" Margin="0,0,5,5" />
                     <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal">
-                        <Button x:Name="BrowseSourceFolderButton" Content="Folder..." Margin="0,0,5,0" Click="BrowseSourceFolder_Click" />
-                        <Button x:Name="BrowseSourceFileButton" Content="File..." Click="BrowseSourceFile_Click" />
+                        <Button x:Name="BrowseSourceFolderButton" Content="Folder" Margin="0,0,5,0" Click="BrowseSourceFolder_Click" />
+                        <Button x:Name="BrowseSourceFileButton" Content="File" Click="BrowseSourceFile_Click" />
                     </StackPanel>
 
                     <!-- Destination -->
                     <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,5,5" VerticalAlignment="Center" Text="Destination:" />
                     <TextBox x:Name="DestinationTextBox" Grid.Row="2" Grid.Column="1" Margin="0,0,5,5" />
-                    <Button x:Name="BrowseDestinationButton" Grid.Row="2" Grid.Column="2" Content="Browse..." Click="BrowseDestination_Click" />
+                    <Button x:Name="BrowseDestinationButton" Grid.Row="2" Grid.Column="2" Content="Browse" Click="BrowseDestination_Click" />
 
                     <!-- Status and start -->
                     <TextBlock x:Name="StatusTextBlock" Grid.Row="3" Grid.ColumnSpan="3" Margin="0,5,0,5" TextWrapping="Wrap" />
@@ -45,6 +46,13 @@
                         <ProgressBar x:Name="JobProgressBar" Width="200" Height="20" IsIndeterminate="False" Visibility="Collapsed" Margin="0,0,10,0" />
                         <Button x:Name="StartButton" Content="Start" Width="80" Click="StartButton_Click" />
                     </StackPanel>
+                    <TextBox x:Name="MainLogTextBox"
+                             Grid.Row="5" Grid.ColumnSpan="3"
+                             Margin="0,10,0,0"
+                             IsReadOnly="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Disabled" />
                 </Grid>
             </TabItem>
             <TabItem Header="Settings">
@@ -69,14 +77,6 @@
                     <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
                         <Button x:Name="SaveSettingsButton" Content="Save" Width="80" Click="SaveSettingsButton_Click" />
                     </StackPanel>
-                </Grid>
-            </TabItem>
-            <TabItem Header="Logs">
-                <Grid Margin="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <ListBox x:Name="LogsListBox" />
                 </Grid>
             </TabItem>
         </TabControl>

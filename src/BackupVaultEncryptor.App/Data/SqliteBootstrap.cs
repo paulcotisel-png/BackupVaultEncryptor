@@ -51,6 +51,33 @@ namespace BackupVaultEncryptor.App.Data
                         Timestamp TEXT NOT NULL,
                         Message TEXT NOT NULL
                     );
+
+                    CREATE TABLE IF NOT EXISTS Users (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        Username TEXT NOT NULL UNIQUE,
+                        RecoveryEmail TEXT NULL,
+                        PasswordHash TEXT NOT NULL,
+                        VaultMasterKeyWrappedCiphertext BLOB NOT NULL,
+                        VaultMasterKeyWrappedNonce BLOB NOT NULL,
+                        VaultMasterKeyWrappedTag BLOB NOT NULL,
+                        VaultMasterKeyProtectedByDpapi BLOB NOT NULL,
+                        KeyWrapSalt BLOB NOT NULL,
+                        PasswordResetTokenHash TEXT NULL,
+                        PasswordResetTokenExpiresUtc TEXT NULL,
+                        CreatedUtc TEXT NOT NULL,
+                        UpdatedUtc TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS RootKeys (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        UserId INTEGER NOT NULL,
+                        RootPath TEXT NOT NULL,
+                        RootKeyEncryptedCiphertext BLOB NOT NULL,
+                        RootKeyEncryptedNonce BLOB NOT NULL,
+                        RootKeyEncryptedTag BLOB NOT NULL,
+                        CreatedUtc TEXT NOT NULL,
+                        UNIQUE(UserId, RootPath)
+                    );
                 ";
                 command.ExecuteNonQuery();
             }

@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+*.db
+*.db-shm
+*.db-wal
+logs/
+temp/
+publish/
+TestResults/
+secrets.local.json

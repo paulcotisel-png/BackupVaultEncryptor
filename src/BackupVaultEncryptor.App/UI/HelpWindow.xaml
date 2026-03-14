@@ -1,0 +1,132 @@
+<Window x:Class="BackupVaultEncryptor.App.UI.HelpWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Help / Guide" Height="500" Width="700" MinHeight="400" MinWidth="600">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,0,10">
+                <!-- 1. What this app does -->
+                <TextBlock FontWeight="Bold" FontSize="14" Margin="0,0,0,4" Text="What this app does" />
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,10">
+                    This app encrypts and decrypts backup folders and files.
+                    It is designed mainly for PC backup roots stored on a NAS or SMB share,
+                    but it also works for local folders and single files.
+                </TextBlock>
+
+                <!-- 2. Encrypt vs Decrypt -->
+                <TextBlock FontWeight="Bold" FontSize="14" Margin="0,0,0,4" Text="Encrypt vs Decrypt" />
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,4">
+                    Encrypt:
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="16,0,0,6">
+                    - Choose a source folder (for example \\server\backups\PCNAME) or a single file.
+                    - Choose a destination folder where encrypted bundle files and a manifest (.json) will be written.
+                    - Click Start to begin encryption. Use Cancel if you need to stop the job.
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,4">
+                    Decrypt:
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="16,0,0,10">
+                    - Choose the manifest (.json) file from a previous encrypt job.
+                    - Choose a destination folder where the original folder structure will be restored.
+                    - Click Start to begin decryption. Use Cancel if you need to stop the job.
+                </TextBlock>
+
+                <!-- 3. Bundles and chunks -->
+                <TextBlock FontWeight="Bold" FontSize="14" Margin="0,0,0,4" Text="Bundles and chunks" />
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">
+                    A bundle is a large encrypted file that can contain many of your original files.
+                    A chunk is the size of each piece of data processed while reading or writing a bundle.
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">
+                    Larger bundles mean fewer large files on the NAS, which is helpful when you have many small files.
+                    Larger chunks process more data at once but use more memory and increase how much data
+                    might need to be retried if a job stops in the middle of a chunk.
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,10">
+                    Changing bundle size or chunk size does not change encryption strength.
+                    It only changes performance, memory usage, how much work is retried on failure,
+                    and how many bundle files are created.
+                </TextBlock>
+
+                <!-- 4. Recommended presets (general) -->
+                <TextBlock FontWeight="Bold" FontSize="14" Margin="0,0,0,4" Text="Recommended presets (general)" />
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">
+                    Safe default (good starting point for most jobs):
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="16,0,0,4">
+                    - Bundle size: 4 GiB
+                    - Chunk size: 8 MiB
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="0,4,0,6">
+                    Balanced (fewer bundle files, slightly higher memory and I/O):
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="16,0,0,10">
+                    - Bundle size: 8 GiB
+                    - Chunk size: 16 MiB
+                </TextBlock>
+
+                <!-- 5. Practical presets for many small files -->
+                <TextBlock FontWeight="Bold" FontSize="14" Margin="0,0,0,4" Text="Practical presets for many small files" />
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">
+                    For backup folders with thousands of small files (around 1.5 MB on average):
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="16,0,0,4">
+                    - Under 10 GB total: 4 GiB bundle / 8 MiB chunk
+                    - Around 20 GB total: 8 GiB bundle / 16 MiB chunk
+                    - Over 100 GB total: start with 8 GiB bundle / 16 MiB chunk, then test 8 GiB bundle / 32 MiB chunk
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="0,4,0,10">
+                    A 12 GiB bundle / 64 MiB chunk preset should be treated as an advanced option only
+                    for well-tested, stable environments. It is not the normal recommendation.
+                </TextBlock>
+
+                <!-- 6. How encryption works (high level) -->
+                <TextBlock FontWeight="Bold" FontSize="14" Margin="0,0,0,4" Text="How encryption works (high level)" />
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">
+                    The app scans your source folder, groups files into bundles, and encrypts each bundle
+                    using strong, modern encryption. Keys are stored in a local vault which is protected
+                    by your password and by Windows.
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,10">
+                    When decrypting, the app reads the manifest and bundles, verifies integrity,
+                    and recreates the original folder structure. If encrypted data is changed or corrupted,
+                    decryption fails instead of silently producing bad data.
+                </TextBlock>
+
+                <!-- 7. Passwords and recovery -->
+                <TextBlock FontWeight="Bold" FontSize="14" Margin="0,0,0,4" Text="Passwords and recovery" />
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">
+                    Your password protects access to the keys needed to decrypt your backups.
+                    The app cannot recover a lost password in a way that lets you decrypt existing data.
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,10">
+                    If you forget or lose your password, old encrypted backups will no longer be decryptable.
+                    Keep your password in a safe place, for example a password manager or another secure record.
+                </TextBlock>
+
+                <!-- 8. Network, NAS, and job behavior -->
+                <TextBlock FontWeight="Bold" FontSize="14" Margin="0,0,0,4" Text="Network, NAS, and job behavior" />
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">
+                    The app is designed for backup folders over SMB/NAS and aims for sequential I/O and low NAS load.
+                    For SMB/NAS jobs with many small files it is recommended to run one job at a time
+                    so that network and NAS load stay predictable.
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,10">
+                    If a job is canceled or interrupted, running the same job again is the correct next step.
+                    Partial work may exist temporarily, but the app will reuse or overwrite incomplete work as needed
+                    according to the current job logic.
+                </TextBlock>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button Width="80" Content="Close" IsCancel="True" />
+        </StackPanel>
+    </Grid>
+</Window>

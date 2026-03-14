@@ -112,7 +112,7 @@ namespace BackupVaultEncryptor.Tests.Services
             var username = "roundtrip-auth-user";
             var password = "AuthRoundTripPassword!123";
 
-            var registeredUser = authService.RegisterUser(username, password, null);
+            var registeredUser = authService.RegisterUser(username, password);
 
             var storedUser = userRepository.GetByUsername(username);
             Assert.IsNotNull(storedUser, "Stored user should not be null after registration.");

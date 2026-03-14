@@ -44,7 +44,7 @@ namespace BackupVaultEncryptor.Tests.Services
         {
             var services = CreateAuthService();
 
-            var user = services.Auth.RegisterUser("alice", "OldPassword!123", null);
+            var user = services.Auth.RegisterUser("alice", "OldPassword!123");
 
             // Capture the plaintext VMK via a login.
             var session1 = services.Auth.Login("alice", "OldPassword!123");
@@ -55,30 +55,6 @@ namespace BackupVaultEncryptor.Tests.Services
 
             // Log in with new password and compare VMK.
             var session2 = services.Auth.Login("alice", "NewPassword!456");
-            Assert.IsNotNull(session2);
-            var vmkAfter = session2!.VaultMasterKey;
-
-            CollectionAssert.AreEqual(vmkBefore, vmkAfter);
-        }
-
-        [TestMethod]
-        public void ResetPasswordWithToken_RewrapsSameVaultMasterKey_UsingDpapiCopy()
-        {
-            var services = CreateAuthService();
-
-            var user = services.Auth.RegisterUser("bob", "InitialPassword!123", null);
-
-            // Capture VMK via a login.
-            var session1 = services.Auth.Login("bob", "InitialPassword!123");
-            Assert.IsNotNull(session1);
-            var vmkBefore = (byte[])session1!.VaultMasterKey.Clone();
-
-            // Create reset token and perform reset without old password.
-            var token = services.Auth.CreatePasswordResetToken("bob", TimeSpan.FromMinutes(10));
-            services.Auth.ResetPasswordWithToken("bob", token, "RecoveredPassword!789");
-
-            // Log in with new password and compare VMK.
-            var session2 = services.Auth.Login("bob", "RecoveredPassword!789");
             Assert.IsNotNull(session2);
             var vmkAfter = session2!.VaultMasterKey;
 

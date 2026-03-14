@@ -8,6 +8,12 @@ namespace BackupVaultEncryptor.App.Infrastructure
         /// <summary>
         /// Directory where the application will store its local data
         /// (SQLite database, log files, etc.). Can be absolute or relative.
+        ///
+        /// In normal application startup, this value is populated by
+        /// AppConfigLoader. If no explicit value is provided in
+        /// appsettings.json, AppConfigLoader will default this to a
+        /// per-user LocalAppData folder, typically:
+        ///   %LocalAppData%\BackupVaultEncryptor
         /// </summary>
         public string AppDataDirectory { get; set; } = "AppData";
 

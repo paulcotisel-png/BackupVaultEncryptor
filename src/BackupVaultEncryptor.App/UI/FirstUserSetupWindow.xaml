@@ -25,8 +25,13 @@
         <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,5,5" VerticalAlignment="Center" Text="Confirm Password:" />
         <PasswordBox x:Name="ConfirmPasswordBox" Grid.Row="2" Grid.Column="1" Margin="0,0,0,5" />
 
-        <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,0,5,5" VerticalAlignment="Center" Text="Recovery Email (optional):" />
-        <TextBox x:Name="RecoveryEmailTextBox" Grid.Row="3" Grid.Column="1" Margin="0,0,0,5" />
+        <!-- Brief reminder that passwords cannot be recovered. The full
+             irreversible-password warning is shown as a confirmation
+             dialog before account creation. -->
+        <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Margin="0,0,0,5" TextWrapping="Wrap">
+            <Run Text="Important: This app does not use email or online accounts. " />
+            <Run Text="If you forget your password, your encrypted data cannot be recovered." />
+        </TextBlock>
 
         <TextBlock x:Name="ErrorTextBlock" Grid.Row="4" Grid.ColumnSpan="2" Foreground="Red" TextWrapping="Wrap" />
 

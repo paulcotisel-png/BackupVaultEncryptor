@@ -27,7 +27,9 @@ BackupVaultEncryptor is a Windows desktop application for encrypting and decrypt
 - **Data**: Contains SQLite bootstrap for database initialization and thin repositories for users and root keys.
 - **Logging**: Contains logging setup.
 
-## Publishing / Release (Windows v1)
+## Publishing / Release (Windows)
+
+The application version is defined in the WPF project file (`src/BackupVaultEncryptor.App/BackupVaultEncryptor.App.csproj`) using standard .NET version properties (`Version`, `AssemblyVersion`, `FileVersion`). The same version appears in the About window (for example, `Version 2.0.0`) and in the Windows file properties for `BackupVaultEncryptor.App.exe`.
 
 ### Recommended publish mode
 
@@ -103,6 +105,23 @@ Treat the **entire `publish` folder** as the release unit:
 
 - When deploying to another machine, **copy the whole folder** (for example to `C:\Apps\BackupVaultEncryptor-v1\`).
 - You can optionally zip the folder for transport and unzip it on the operator machine.
+
+### Release folder naming
+
+When you publish a new version, copy the contents of the `publish` folder into a versioned folder. A simple convention is:
+
+- `BackupVaultEncryptor-v2.0.0`
+
+Recommended pattern:
+
+- `BackupVaultEncryptor-vMAJOR.MINOR.PATCH`
+
+Examples:
+
+- `BackupVaultEncryptor-v2.0.0`
+- `BackupVaultEncryptor-v2.0.1`
+
+The app’s **About** window shows the same version string (for example, `Version 2.0.0`). When you upgrade, create a new folder (for example, `BackupVaultEncryptor-v2.0.1`) instead of overwriting the old one. This makes it easy to keep older builds if you need to roll back.
 
 ### Running the published app
 

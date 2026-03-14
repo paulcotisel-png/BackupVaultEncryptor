@@ -33,7 +33,6 @@ namespace BackupVaultEncryptor.App.UI
             var username = UsernameTextBox.Text?.Trim() ?? string.Empty;
             var password = PasswordBox.Password ?? string.Empty;
             var confirm = ConfirmPasswordBox.Password ?? string.Empty;
-            var email = RecoveryEmailTextBox.Text?.Trim();
 
             if (string.IsNullOrWhiteSpace(username))
             {
@@ -53,6 +52,32 @@ namespace BackupVaultEncryptor.App.UI
                 return;
             }
 
+            // Show a clear, one-time confirmation that the password cannot
+            // be recovered or reset before creating the account.
+            var warningMessage =
+                "This app does not use email or online accounts." + Environment.NewLine +
+                "Your password is the only way to unlock your encrypted backups." + Environment.NewLine +
+                Environment.NewLine +
+                "If you forget this password, your encrypted data cannot be recovered or reset." + Environment.NewLine +
+                Environment.NewLine +
+                "Make sure you:" + Environment.NewLine +
+                "- Choose a strong password you can remember" + Environment.NewLine +
+                "- Store it in a safe place (for example, a password manager)" + Environment.NewLine +
+                Environment.NewLine +
+                "Do you want to create this account with the password you entered?";
+
+            var warningResult = MessageBox.Show(
+                warningMessage,
+                "Important: Password cannot be recovered",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+
+            if (warningResult != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
             var registrationSucceeded = false;
 
             try
@@ -62,7 +87,7 @@ namespace BackupVaultEncryptor.App.UI
 
                 _logger.Log($"First user setup: create clicked for username '{username}'. Starting registration.");
 
-                _authService.RegisterUser(username, password, email);
+                _authService.RegisterUser(username, password);
                 _logger.Log($"First user setup: registration succeeded for username '{username}'.");
                 registrationSucceeded = true;
 

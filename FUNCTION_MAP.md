@@ -4,7 +4,7 @@
 WPF project skeleton with initial configuration, logging, and local SQLite bootstrap wired into application startup.
 
 ## Areas
-- UI: MainWindow with Main, Settings, Logs tabs
+- UI: MainWindow with Encrypt, Decrypt, Settings tabs and shared status/progress/log area
 - Core/Infrastructure:
   - `AppConfig`
     - Properties: `AppDataDirectory`, `DatabaseFileName`, `LogFileName`
@@ -110,7 +110,7 @@ WPF project skeleton with initial configuration, logging, and local SQLite boots
     - Simple model carrying `Phase`, `ProcessedBytes`, `TotalBytes`, `PercentComplete`, `CurrentBundleIndex`, `TotalBundles`, and optional `CurrentItemName` for UI progress display
 - Services:
   - `AuthService`
-    - `RegisterUser(string username, string password, string? recoveryEmail)` creates a new local user, hashes the password with Argon2id, generates and wraps a VaultMasterKey, and stores all fields in the `Users` table.
+    - `RegisterUser(string username, string password)` creates a new local user, hashes the password with Argon2id, generates and wraps a VaultMasterKey, and stores all fields in the `Users` table. Recovery email is no longer collected or used.
     - `Login(string username, string password)` looks up the user by username, verifies the password using the stored Argon2id hash, derives the wrapping key, unwraps the VaultMasterKey, and returns a `UserSession` on success. Logs each step of the login flow; returns `null` for bad credentials and throws `LoginInternalException` for post-verification internal failures.
     - `LoginInternalException` is a nested exception type used to signal that credentials were valid but an internal error occurred after verification (for example, during VMK unwrap or session creation). This allows the UI to show a different message than for bad credentials.
   - `VaultService`

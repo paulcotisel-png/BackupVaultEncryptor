@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <!-- Main MSI package definition -->
+  <Package
+    Name="BackupVaultEncryptor"
+    Manufacturer="BackupVaultEncryptor Project"
+    Version="2.0.0"
+    UpgradeCode="F9C8C4C6-6F1D-4B9B-8E20-0A52E7C3D8A1"
+    Language="1033"
+    InstallerVersion="500"
+    Scope="perMachine"
+    Compressed="yes">
+
+    <!-- Major upgrade: newer MSI replaces older version cleanly while leaving user data alone -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <!-- Install directory under Program Files (x64) -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="BackupVaultEncryptor" />
+    </StandardDirectory>
+
+    <!-- Start Menu folder for the app -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="BackupVaultEncryptor" />
+    </StandardDirectory>
+
+    <!-- Common desktop for optional desktop shortcut -->
+    <StandardDirectory Id="DesktopFolder" />
+
+    <!-- Main feature installs app files and shortcuts -->
+    <Feature Id="MainFeature" Title="BackupVaultEncryptor" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcutComponent" />
+      <ComponentRef Id="DesktopShortcutComponent" />
+    </Feature>
+
+    <!-- Start Menu shortcut component -->
+    <Component Id="StartMenuShortcutComponent" Guid="*">
+      <Shortcut
+        Id="StartMenuShortcut"
+        Name="BackupVaultEncryptor"
+        Directory="ApplicationProgramsFolder"
+        WorkingDirectory="INSTALLFOLDER"
+        Target="[INSTALLFOLDER]BackupVaultEncryptor.App.exe" />
+      <!-- Remove the Start Menu folder on uninstall -->
+      <RemoveFolder Id="RemoveStartMenuFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+      <!-- Simple registry key path so MSI can track this component -->
+      <RegistryValue Root="HKCU" Key="Software\BackupVaultEncryptor" Name="StartMenuShortcut" Value="1" Type="integer" KeyPath="yes" />
+    </Component>
+
+    <!-- Desktop shortcut component -->
+    <Component Id="DesktopShortcutComponent" Guid="*">
+      <Shortcut
+        Id="DesktopShortcut"
+        Name="BackupVaultEncryptor"
+        Directory="DesktopFolder"
+        WorkingDirectory="INSTALLFOLDER"
+        Target="[INSTALLFOLDER]BackupVaultEncryptor.App.exe" />
+      <!-- Registry key path for this component -->
+      <RegistryValue Root="HKCU" Key="Software\BackupVaultEncryptor" Name="DesktopShortcut" Value="1" Type="integer" KeyPath="yes" />
+    </Component>
+
+  </Package>
+  
+  <!--
+    Harvest all files from the self-contained publish directory into INSTALLFOLDER.
+    The bind path "PublishDir" is defined in the wixproj and points to the
+    publish-installer folder. This includes appsettings.json unchanged.
+  -->
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Directory="INSTALLFOLDER" Include="!(bindpath.PublishDir)\**">
+        <Exclude Files="!(bindpath.PublishDir)\**\*.wixpdb" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

@@ -1,0 +1,19 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <!-- Build an MSI package for x64 -->
+    <OutputType>Package</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Platform>x64</Platform>
+  </PropertyGroup>
+
+  <!-- Directory containing the self-contained publish output used as installer payload -->
+  <PropertyGroup>
+    <PublishDir>..\BackupVaultEncryptor.App\bin\Release\net8.0-windows\win-x64\publish-installer\</PublishDir>
+  </PropertyGroup>
+
+  <!-- Bind path for the published installer payload -->
+  <ItemGroup>
+    <BindPath Include="$(PublishDir)" BindName="PublishDir" />
+  </ItemGroup>
+
+</Project>

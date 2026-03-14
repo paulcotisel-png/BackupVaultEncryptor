@@ -22,18 +22,25 @@ namespace BackupVaultEncryptor.App.Infrastructure
 
             // Read values directly from configuration with simple defaults.
             var appDataDirectory = configuration["AppDataDirectory"];
+            var appDataDirectoryOrEmpty = appDataDirectory ?? string.Empty;
+
+            // Resolve to a non-null final AppDataDirectory while preserving
+            // the existing LocalAppData + migration behavior.
+            string resolvedAppDataDirectory;
 
             // If no explicit AppDataDirectory is configured, or if the
             // legacy value "AppData" is used, default to a per-user
             // LocalAppData folder and, if possible, migrate from the
             // old app-folder AppData location.
-            if (string.IsNullOrWhiteSpace(appDataDirectory) ||
-                string.Equals(appDataDirectory?.Trim(), "AppData", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(appDataDirectoryOrEmpty) ||
+                string.Equals(appDataDirectoryOrEmpty.Trim(), "AppData", StringComparison.OrdinalIgnoreCase))
             {
                 var oldDefaultDirectory = Path.Combine(basePath, "AppData");
 
                 var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                 var newDefaultDirectory = Path.Combine(localAppData, "BackupVaultEncryptor");
+
+                string finalDirectory;
 
                 // Migration policy:
                 // - If the old app-folder AppData exists and the new
@@ -49,13 +56,13 @@ namespace BackupVaultEncryptor.App.Infrastructure
                     try
                     {
                         Directory.Move(oldDefaultDirectory, newDefaultDirectory);
-                        appDataDirectory = newDefaultDirectory;
+                        finalDirectory = newDefaultDirectory;
                     }
                     catch
                     {
                         // If the move fails for any reason, fall back to
                         // the old location so the app can still function.
-                        appDataDirectory = oldDefaultDirectory;
+                        finalDirectory = oldDefaultDirectory;
                     }
                 }
                 else
@@ -63,8 +70,15 @@ namespace BackupVaultEncryptor.App.Infrastructure
                     // Either this is a fresh install with no old data, or
                     // the new directory already exists. In both cases we
                     // prefer the LocalAppData location.
-                    appDataDirectory = newDefaultDirectory;
+                    finalDirectory = newDefaultDirectory;
                 }
+
+                resolvedAppDataDirectory = finalDirectory;
+            }
+            else
+            {
+                // Explicit non-empty value other than "AppData".
+                resolvedAppDataDirectory = appDataDirectoryOrEmpty;
             }
 
             var databaseFileName = configuration["DatabaseFileName"];
@@ -81,7 +95,7 @@ namespace BackupVaultEncryptor.App.Infrastructure
 
             var config = new AppConfig
             {
-                AppDataDirectory = appDataDirectory,
+                AppDataDirectory = resolvedAppDataDirectory,
                 DatabaseFileName = databaseFileName,
                 LogFileName = logFileName
             };

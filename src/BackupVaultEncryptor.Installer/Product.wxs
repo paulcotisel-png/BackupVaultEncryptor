@@ -3,9 +3,9 @@
 
   <!-- Main MSI package definition -->
   <Package
-    Name="BackupVaultEncryptor"
+    Name="VaultEncrypt"
     Manufacturer="BackupVaultEncryptor Project"
-    Version="2.0.0"
+    Version="2.0.1"
     UpgradeCode="F9C8C4C6-6F1D-4B9B-8E20-0A52E7C3D8A1"
     Language="1033"
     InstallerVersion="500"
@@ -17,19 +17,19 @@
 
     <!-- Install directory under Program Files (x64) -->
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="BackupVaultEncryptor" />
+      <Directory Id="INSTALLFOLDER" Name="VaultEncrypt" />
     </StandardDirectory>
 
     <!-- Start Menu folder for the app -->
     <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="ApplicationProgramsFolder" Name="BackupVaultEncryptor" />
+      <Directory Id="ApplicationProgramsFolder" Name="VaultEncrypt" />
     </StandardDirectory>
 
     <!-- Common desktop for optional desktop shortcut -->
     <StandardDirectory Id="DesktopFolder" />
 
     <!-- Main feature installs app files and shortcuts -->
-    <Feature Id="MainFeature" Title="BackupVaultEncryptor" Level="1">
+    <Feature Id="MainFeature" Title="VaultEncrypt" Level="1">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentRef Id="StartMenuShortcutComponent" />
       <ComponentRef Id="DesktopShortcutComponent" />
@@ -39,7 +39,7 @@
     <Component Id="StartMenuShortcutComponent" Guid="*">
       <Shortcut
         Id="StartMenuShortcut"
-        Name="BackupVaultEncryptor"
+        Name="VaultEncrypt"
         Directory="ApplicationProgramsFolder"
         WorkingDirectory="INSTALLFOLDER"
         Target="[INSTALLFOLDER]BackupVaultEncryptor.App.exe" />
@@ -53,7 +53,7 @@
     <Component Id="DesktopShortcutComponent" Guid="*">
       <Shortcut
         Id="DesktopShortcut"
-        Name="BackupVaultEncryptor"
+        Name="VaultEncrypt"
         Directory="DesktopFolder"
         WorkingDirectory="INSTALLFOLDER"
         Target="[INSTALLFOLDER]BackupVaultEncryptor.App.exe" />

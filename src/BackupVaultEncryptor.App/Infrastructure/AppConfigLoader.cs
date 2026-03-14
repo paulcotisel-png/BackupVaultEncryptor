@@ -23,10 +23,12 @@ namespace BackupVaultEncryptor.App.Infrastructure
             // Read values directly from configuration with simple defaults.
             var appDataDirectory = configuration["AppDataDirectory"];
 
-            // If no explicit AppDataDirectory is configured, default to a
-            // per-user LocalAppData folder and, if possible, migrate from
-            // the old app-folder AppData location.
-            if (string.IsNullOrWhiteSpace(appDataDirectory))
+            // If no explicit AppDataDirectory is configured, or if the
+            // legacy value "AppData" is used, default to a per-user
+            // LocalAppData folder and, if possible, migrate from the
+            // old app-folder AppData location.
+            if (string.IsNullOrWhiteSpace(appDataDirectory) ||
+                string.Equals(appDataDirectory?.Trim(), "AppData", StringComparison.OrdinalIgnoreCase))
             {
                 var oldDefaultDirectory = Path.Combine(basePath, "AppData");
 

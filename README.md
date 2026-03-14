@@ -1,7 +1,7 @@
-# BackupVaultEncryptor
+# VaultEncrypt
 
 ## Overview
-BackupVaultEncryptor is a Windows desktop application for encrypting and decrypting folders/files, primarily for backup encryption.
+VaultEncrypt is a Windows desktop application for encrypting and decrypting folders/files, primarily for backup encryption.
 
 ## Build and Run
 1. Ensure you have the **.NET 8 SDK** installed.
@@ -110,18 +110,18 @@ Treat the **entire `publish` folder** as the release unit:
 
 When you publish a new version, copy the contents of the `publish` folder into a versioned folder. A simple convention is:
 
-- `BackupVaultEncryptor-v2.0.0`
+- `VaultEncrypt-v2.0.0`
 
 Recommended pattern:
 
-- `BackupVaultEncryptor-vMAJOR.MINOR.PATCH`
+- `VaultEncrypt-vMAJOR.MINOR.PATCH`
 
 Examples:
 
-- `BackupVaultEncryptor-v2.0.0`
-- `BackupVaultEncryptor-v2.0.1`
+- `VaultEncrypt-v2.0.0`
+- `VaultEncrypt-v2.0.1`
 
-The app’s **About** window shows the same version string (for example, `Version 2.0.0`). When you upgrade, create a new folder (for example, `BackupVaultEncryptor-v2.0.1`) instead of overwriting the old one. This makes it easy to keep older builds if you need to roll back.
+The app’s **About** window shows the same version string (for example, `Version 2.0.0`). When you upgrade, create a new folder (for example, `VaultEncrypt-v2.0.1`) instead of overwriting the old one. This makes it easy to keep older builds if you need to roll back.
 
 ### Running the published app
 
@@ -135,13 +135,13 @@ On the operator machine:
 
 ### Runtime data, settings, log, and database files
 
-At runtime, the application creates and uses a simple local data folder relative to where the app is run:
+At runtime, the application creates and uses a per-user data folder under LocalAppData by default:
 
 - **App data directory** (default):
-  - `AppData` folder next to the `.exe`
+  - `%LocalAppData%\\BackupVaultEncryptor`
   - This can be changed via `AppDataDirectory` in `appsettings.json` if needed.
 
-Inside this `AppData` folder, the app creates:
+Inside this app data directory, the app creates:
 
 - **SQLite database file** (default name):
   - `appdata.db`
@@ -152,18 +152,18 @@ Inside this `AppData` folder, the app creates:
 
 These defaults are controlled by `appsettings.json` keys:
 
-- `AppDataDirectory` (default `"AppData"`)
+- `AppDataDirectory` (default empty / legacy `"AppData"` is mapped to the same LocalAppData location)
 - `DatabaseFileName` (default `"appdata.db"`)
 - `LogFileName` (default `"app.log"`)
 
-If `AppDataDirectory` is a relative path (the default), it is resolved under the folder where the application is running. If you move the whole application folder (including the `AppData` subfolder), your users and vault metadata move with it.
+If you previously used a version of the app that stored data in an `AppData` folder next to the `.exe`, the application will attempt a one-time migration of that folder into `%LocalAppData%\\BackupVaultEncryptor` when you upgrade.
 
 ### What to back up to preserve users and vault metadata
 
 To preserve local users, authentication data, and vault key metadata for a given deployment:
 
 1. Back up the **entire application folder**, including the `publish` contents.
-2. Make sure the **`AppData` folder** (or the custom `AppDataDirectory` you configured) is included in that backup.
+2. Make sure the **application data directory** (default `%LocalAppData%\\BackupVaultEncryptor`, or the custom `AppDataDirectory` you configured) is included in that backup.
    - This ensures you keep:
      - `appdata.db` (SQLite database with users and keys)
      - `app.log` (log history)
@@ -171,7 +171,7 @@ To preserve local users, authentication data, and vault key metadata for a given
 Restoring from backup typically means restoring:
 
 - The application folder (including the `publish` files), and
-- The `AppData` folder (or your configured app data directory) with `appdata.db` and `app.log`.
+- The application data directory (default `%LocalAppData%\\BackupVaultEncryptor`, or your configured app data directory) with `appdata.db` and `app.log`.
 
 ### Deployment limitations (v1)
 

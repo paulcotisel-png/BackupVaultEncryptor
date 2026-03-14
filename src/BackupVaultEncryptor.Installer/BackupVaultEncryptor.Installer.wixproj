@@ -4,6 +4,7 @@
     <OutputType>Package</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <Platform>x64</Platform>
+    <InstallerPlatform>x64</InstallerPlatform>
   </PropertyGroup>
 
   <!-- Directory containing the self-contained publish output used as installer payload -->

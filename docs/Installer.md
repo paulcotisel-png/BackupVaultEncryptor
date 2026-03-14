@@ -1,9 +1,9 @@
-# BackupVaultEncryptor MSI Installer
+# VaultEncrypt MSI Installer
 
-This document describes how to build and use the MSI installer for BackupVaultEncryptor.
+This document describes how to build and use the MSI installer for VaultEncrypt.
 
 The installer:
-- Installs **per machine** under `C:\Program Files\BackupVaultEncryptor` (x64).
+- Installs **per machine** under `C:\Program Files\VaultEncrypt` (x64).
 - Creates a **Start Menu** shortcut and an optional **Desktop** shortcut.
 - Adds an entry to **Apps & Features / Control Panel**.
 - Supports clean **uninstall** and **major upgrades** (newer MSI replaces older one).
@@ -52,9 +52,9 @@ with a file name similar to `BackupVaultEncryptor.msi`.
 3. Follow the standard Windows Installer UI to complete installation (administrator rights may be required).
 
 After install:
-- The app is installed under `C:\Program Files\BackupVaultEncryptor`.
-- A Start Menu shortcut is created in the **BackupVaultEncryptor** folder.
-- A Desktop shortcut named **BackupVaultEncryptor** is created for all users.
+- The app is installed under `C:\Program Files\VaultEncrypt`.
+- A Start Menu shortcut is created in the **VaultEncrypt** folder.
+- A Desktop shortcut named **VaultEncrypt** is created for all users.
 
 ## 4. Uninstall the MSI
 

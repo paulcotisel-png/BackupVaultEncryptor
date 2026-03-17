@@ -720,6 +720,12 @@ public partial class MainWindow : Window
 
             StatusTextBlock.Text = $"{progress.Phase}: {percent:0.0}%{bundleInfo}{itemInfo}";
 
+            if (string.Equals(progress.Phase, "Metrics", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(progress.CurrentItemName))
+            {
+                AppendMainLogLine($"[Metrics] {progress.CurrentItemName}");
+                return;
+            }
+
             if (!string.IsNullOrEmpty(progress.Phase) && progress.Phase != _lastProgressPhase)
             {
                 _lastProgressPhase = progress.Phase;

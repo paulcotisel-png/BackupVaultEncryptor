@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -37,6 +38,9 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
+            var runStopwatch = Stopwatch.StartNew();
+            var runMetrics = new EncryptRunMetrics();
+
             var scratchJobDirectory = GetScratchJobDirectory(request.ScratchRoot, request.JobId);
             var localManifestPath = Path.Combine(scratchJobDirectory, $"{request.JobId}_manifest.json");
             var destinationManifestPath = Path.Combine(request.DestinationRoot, $"{request.JobId}_manifest.json");
@@ -71,19 +75,33 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
+                    if (!runMetrics.FirstBundleReadyLogged)
+                    {
+                        runMetrics.FirstBundleReadyLogged = true;
+                        EmitMetricsLine(
+                            progress,
+                            $"First bundle ready in {FormatDuration(runStopwatch.Elapsed)} ({plannedBundle.Entries.Count} files, {FormatMegabytes(plannedBundle.TotalPlaintextBytes)} MB).",
+                            bundleIndex + 1,
+                            0);
+                    }
+
                     var existingBundle = FindBundle(manifest, plannedBundle.BundleIndex);
-                    if (await TryHandleExistingBundleAsync(
+                    var reusedBundleMetrics = await TryHandleExistingBundleAsync(
                         request,
                         manifest,
                         existingBundle,
                         plannedBundle,
                         scratchJobDirectory,
                         localManifestPath,
+                        runStopwatch,
+                        runMetrics,
                         progress,
                         processedBytes,
                         bundleIndex + 1,
-                        cancellationToken).ConfigureAwait(false))
+                        cancellationToken).ConfigureAwait(false);
+                    if (reusedBundleMetrics != null)
                     {
+                        runMetrics.AddBundle(reusedBundleMetrics);
                         processedBytes += plannedBundle.TotalPlaintextBytes;
                         bundleIndex++;
                         continue;
@@ -91,7 +109,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
 
                     var currentBundleIndex = bundleIndex + 1;
 
-                    var bundleInfo = await EncryptBundleAsync(
+                    var bundleResult = await EncryptBundleAsync(
                         request,
                         rootKey,
                         plannedBundle,
@@ -101,11 +119,30 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                         progress,
                         cancellationToken).ConfigureAwait(false);
 
+                    var bundleInfo = bundleResult.BundleInfo;
+
                     ReplaceBundle(manifest, bundleInfo);
                     await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
-                    await PublishBundleToDestinationAsync(request, scratchJobDirectory, bundleInfo, cancellationToken).ConfigureAwait(false);
+                    bundleResult.Metrics.PublishElapsed = await PublishBundleToDestinationAsync(request, scratchJobDirectory, bundleInfo, cancellationToken).ConfigureAwait(false);
                     bundleInfo.IsPublished = true;
                     await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
+
+                    if (!runMetrics.FirstBundlePublishedLogged)
+                    {
+                        runMetrics.FirstBundlePublishedLogged = true;
+                        EmitMetricsLine(
+                            progress,
+                            $"First bundle published in {FormatDuration(runStopwatch.Elapsed)}.",
+                            currentBundleIndex,
+                            processedBytes + plannedBundle.TotalPlaintextBytes);
+                    }
+
+                    runMetrics.AddBundle(bundleResult.Metrics);
+                    EmitMetricsLine(
+                        progress,
+                        $"Bundle {currentBundleIndex}: {bundleResult.Metrics.FileCount} files, {FormatMegabytes(bundleResult.Metrics.PlaintextBytes)} MB | read {FormatDuration(bundleResult.Metrics.SourceReadElapsed)} | encrypt/write {FormatDuration(bundleResult.Metrics.EncryptWriteElapsed)} | publish {FormatDuration(bundleResult.Metrics.PublishElapsed)}.",
+                        currentBundleIndex,
+                        processedBytes + plannedBundle.TotalPlaintextBytes);
 
                     processedBytes += plannedBundle.TotalPlaintextBytes;
                     bundleIndex++;
@@ -114,6 +151,15 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                 manifest.Status = "Completed";
                 await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
                 await PublishManifestToDestinationAsync(manifest, destinationManifestPath, cancellationToken).ConfigureAwait(false);
+
+                var elapsedSeconds = Math.Max(runStopwatch.Elapsed.TotalSeconds, 0.001d);
+                var filesPerSecond = runMetrics.TotalFiles / elapsedSeconds;
+                var megabytesPerSecond = (runMetrics.TotalBytes / 1024d / 1024d) / elapsedSeconds;
+                EmitMetricsLine(
+                    progress,
+                    $"Encrypt summary: {runMetrics.TotalFiles} files, {FormatMegabytes(runMetrics.TotalBytes)} MB in {FormatDuration(runStopwatch.Elapsed)} | {filesPerSecond:0.0} files/s | {megabytesPerSecond:0.0} MB/s | read {FormatDuration(runMetrics.TotalSourceReadElapsed)} | encrypt/write {FormatDuration(runMetrics.TotalEncryptWriteElapsed)} | publish {FormatDuration(runMetrics.TotalPublishElapsed)}.",
+                    bundleIndex,
+                    processedBytes);
             }
             finally
             {
@@ -172,13 +218,15 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             manifest.Bundles.Sort((left, right) => left.BundleIndex.CompareTo(right.BundleIndex));
         }
 
-        private async Task<bool> TryHandleExistingBundleAsync(
+        private async Task<BundleMetrics?> TryHandleExistingBundleAsync(
             BackupJobEncryptRequest request,
             BackupJobManifest manifest,
             BackupBundleInfo? existingBundle,
             PlannedBundle plannedBundle,
             string scratchJobDirectory,
             string localManifestPath,
+            Stopwatch runStopwatch,
+            EncryptRunMetrics runMetrics,
             IProgress<BackupProgress>? progress,
             long processedBytesBase,
             int currentBundleIndex,
@@ -186,7 +234,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
         {
             if (existingBundle == null)
             {
-                return false;
+                return null;
             }
 
             existingBundle.TotalPlaintextBytes = plannedBundle.TotalPlaintextBytes;
@@ -199,22 +247,56 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             if (existingBundle.IsPublished && hasValidPublishedBundle)
             {
                 ReportBundleState(progress, processedBytesBase, currentBundleIndex, plannedBundle.BundleIndex, "Encrypting");
-                return true;
+                if (!runMetrics.FirstBundlePublishedLogged)
+                {
+                    runMetrics.FirstBundlePublishedLogged = true;
+                    EmitMetricsLine(
+                        progress,
+                        $"First bundle published in {FormatDuration(runStopwatch.Elapsed)}.",
+                        currentBundleIndex,
+                        processedBytesBase + plannedBundle.TotalPlaintextBytes);
+                }
+
+                var metrics = BundleMetrics.ForBundle(plannedBundle);
+                EmitMetricsLine(
+                    progress,
+                    $"Bundle {currentBundleIndex}: {metrics.FileCount} files, {FormatMegabytes(metrics.PlaintextBytes)} MB | reused already-published bundle.",
+                    currentBundleIndex,
+                    processedBytesBase + plannedBundle.TotalPlaintextBytes);
+                return metrics;
             }
 
             if (hasValidLocalBundle)
             {
-                await PublishBundleToDestinationAsync(request, scratchJobDirectory, existingBundle, cancellationToken).ConfigureAwait(false);
+                var publishElapsed = await PublishBundleToDestinationAsync(request, scratchJobDirectory, existingBundle, cancellationToken).ConfigureAwait(false);
                 existingBundle.IsPublished = true;
                 await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
                 ReportBundleState(progress, processedBytesBase, currentBundleIndex, plannedBundle.BundleIndex, "Publishing");
-                return true;
+
+                if (!runMetrics.FirstBundlePublishedLogged)
+                {
+                    runMetrics.FirstBundlePublishedLogged = true;
+                    EmitMetricsLine(
+                        progress,
+                        $"First bundle published in {FormatDuration(runStopwatch.Elapsed)}.",
+                        currentBundleIndex,
+                        processedBytesBase + plannedBundle.TotalPlaintextBytes);
+                }
+
+                var metrics = BundleMetrics.ForBundle(plannedBundle);
+                metrics.PublishElapsed = publishElapsed;
+                EmitMetricsLine(
+                    progress,
+                    $"Bundle {currentBundleIndex}: {metrics.FileCount} files, {FormatMegabytes(metrics.PlaintextBytes)} MB | reused local scratch bundle | publish {FormatDuration(metrics.PublishElapsed)}.",
+                    currentBundleIndex,
+                    processedBytesBase + plannedBundle.TotalPlaintextBytes);
+                return metrics;
             }
 
             existingBundle.IsPublished = false;
             manifest.Bundles.RemoveAll(bundle => bundle.BundleIndex == plannedBundle.BundleIndex);
             await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
-            return false;
+            return null;
         }
 
         private static bool IsBundleFileValid(string path, long expectedLength)
@@ -228,7 +310,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             return info.Length == expectedLength;
         }
 
-        private async Task<BackupBundleInfo> EncryptBundleAsync(
+        private async Task<EncryptBundleResult> EncryptBundleAsync(
             BackupJobEncryptRequest request,
             byte[] rootKey,
             PlannedBundle plannedBundle,
@@ -239,6 +321,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             CancellationToken cancellationToken)
         {
             var bundleKey = BundleKeyDerivation.DeriveBundleKey(rootKey, request.JobId, plannedBundle.BundleIndex);
+            var metrics = BundleMetrics.ForBundle(plannedBundle);
 
             try
             {
@@ -288,11 +371,20 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                         bundleInfo.Entries.Add(manifestEntry);
 
                         using var fileStream = new FileStream(entry.File.FullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                        int bytesRead;
-                        while ((bytesRead = await fileStream.ReadAsync(chunkBuffer, 0, chunkBuffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
+                        while (true)
                         {
+                            var readStarted = Stopwatch.GetTimestamp();
+                            var bytesRead = await fileStream.ReadAsync(chunkBuffer, 0, chunkBuffer.Length, cancellationToken).ConfigureAwait(false);
+                            metrics.SourceReadElapsed += GetElapsed(readStarted);
+
+                            if (bytesRead <= 0)
+                            {
+                                break;
+                            }
+
                             cancellationToken.ThrowIfCancellationRequested();
 
+                            var encryptWriteStarted = Stopwatch.GetTimestamp();
                             var nonce = BuildNonce(noncePrefix, chunkCounter);
                             Array.Clear(ciphertextBuffer, 0, ciphertextBuffer.Length);
                             Array.Clear(tagBuffer, 0, tagBuffer.Length);
@@ -304,6 +396,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                             await stream.WriteAsync(lengthBytes, 0, lengthBytes.Length, cancellationToken).ConfigureAwait(false);
                             await stream.WriteAsync(ciphertextBuffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
                             await stream.WriteAsync(tagBuffer, 0, tagBuffer.Length, cancellationToken).ConfigureAwait(false);
+                            metrics.EncryptWriteElapsed += GetElapsed(encryptWriteStarted);
 
                             bundleProcessed += bytesRead;
 
@@ -339,7 +432,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
 
                 _logger.Log($"Created bundle {bundleFileName} ({bundleInfo.BundleFileSizeBytes} bytes) for job {request.JobId}.");
 
-                return bundleInfo;
+                return new EncryptBundleResult(bundleInfo, metrics);
             }
             finally
             {
@@ -382,12 +475,13 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             return nonce;
         }
 
-        private async Task PublishBundleToDestinationAsync(
+        private async Task<TimeSpan> PublishBundleToDestinationAsync(
             BackupJobEncryptRequest request,
             string scratchJobDirectory,
             BackupBundleInfo bundleInfo,
             CancellationToken cancellationToken)
         {
+            var started = Stopwatch.GetTimestamp();
             Directory.CreateDirectory(request.DestinationRoot);
 
             var sourcePath = Path.Combine(scratchJobDirectory, bundleInfo.BundleFileName);
@@ -412,6 +506,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
 
             File.Move(tempDestinationPath, destinationPath);
             _logger.Log($"Published bundle {bundleInfo.BundleFileName} for job {request.JobId}.");
+            return GetElapsed(started);
         }
 
         private async Task PublishManifestToDestinationAsync(BackupJobManifest manifest, string destinationManifestPath, CancellationToken cancellationToken)
@@ -442,6 +537,94 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                 TotalBundles = 0,
                 CurrentItemName = $"bundle_{bundleIndex:D4}"
             });
+        }
+
+        private void EmitMetricsLine(IProgress<BackupProgress>? progress, string message, int currentBundleIndex, long processedBytes)
+        {
+            _logger.Log(message);
+
+            if (progress == null)
+            {
+                return;
+            }
+
+            progress.Report(new BackupProgress
+            {
+                Phase = "Metrics",
+                ProcessedBytes = processedBytes,
+                TotalBytes = 0,
+                CurrentBundleIndex = currentBundleIndex,
+                TotalBundles = 0,
+                CurrentItemName = message
+            });
+        }
+
+        private static TimeSpan GetElapsed(long startedTimestamp)
+        {
+            var elapsedTicks = Stopwatch.GetTimestamp() - startedTimestamp;
+            return TimeSpan.FromSeconds(elapsedTicks / (double)Stopwatch.Frequency);
+        }
+
+        private static string FormatDuration(TimeSpan duration)
+        {
+            return duration.TotalSeconds >= 10
+                ? duration.ToString(@"hh\:mm\:ss")
+                : $"{duration.TotalSeconds:0.00} s";
+        }
+
+        private static string FormatMegabytes(long bytes)
+        {
+            return (bytes / 1024d / 1024d).ToString("0.0");
+        }
+
+        private sealed class EncryptRunMetrics
+        {
+            public bool FirstBundleReadyLogged { get; set; }
+            public bool FirstBundlePublishedLogged { get; set; }
+            public long TotalFiles { get; private set; }
+            public long TotalBytes { get; private set; }
+            public TimeSpan TotalSourceReadElapsed { get; private set; }
+            public TimeSpan TotalEncryptWriteElapsed { get; private set; }
+            public TimeSpan TotalPublishElapsed { get; private set; }
+
+            public void AddBundle(BundleMetrics metrics)
+            {
+                TotalFiles += metrics.FileCount;
+                TotalBytes += metrics.PlaintextBytes;
+                TotalSourceReadElapsed += metrics.SourceReadElapsed;
+                TotalEncryptWriteElapsed += metrics.EncryptWriteElapsed;
+                TotalPublishElapsed += metrics.PublishElapsed;
+            }
+        }
+
+        private sealed class EncryptBundleResult
+        {
+            public EncryptBundleResult(BackupBundleInfo bundleInfo, BundleMetrics metrics)
+            {
+                BundleInfo = bundleInfo;
+                Metrics = metrics;
+            }
+
+            public BackupBundleInfo BundleInfo { get; }
+            public BundleMetrics Metrics { get; }
+        }
+
+        private sealed class BundleMetrics
+        {
+            public int FileCount { get; set; }
+            public long PlaintextBytes { get; set; }
+            public TimeSpan SourceReadElapsed { get; set; }
+            public TimeSpan EncryptWriteElapsed { get; set; }
+            public TimeSpan PublishElapsed { get; set; }
+
+            public static BundleMetrics ForBundle(PlannedBundle plannedBundle)
+            {
+                return new BundleMetrics
+                {
+                    FileCount = plannedBundle.Entries.Count,
+                    PlaintextBytes = plannedBundle.TotalPlaintextBytes
+                };
+            }
         }
     }
 

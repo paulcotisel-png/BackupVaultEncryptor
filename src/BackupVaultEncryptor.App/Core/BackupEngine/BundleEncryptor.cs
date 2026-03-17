@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BackupVaultEncryptor.App.Core.Models;
@@ -36,26 +37,17 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
-            var manifestPath = Path.Combine(request.DestinationRoot, $"{request.JobId}_manifest.json");
+            var scratchJobDirectory = GetScratchJobDirectory(request.ScratchRoot, request.JobId);
+            var localManifestPath = Path.Combine(scratchJobDirectory, $"{request.JobId}_manifest.json");
+            var destinationManifestPath = Path.Combine(request.DestinationRoot, $"{request.JobId}_manifest.json");
 
-            BackupJobManifest manifest;
-            if (File.Exists(manifestPath))
-            {
-                manifest = await _manifestStorage.LoadAsync(manifestPath, cancellationToken);
-            }
-            else
-            {
-                manifest = new BackupJobManifest
-                {
-                    JobId = request.JobId,
-                    SourceRoot = request.SourceRoot,
-                    CreatedUtc = DateTime.UtcNow,
-                    BundleTargetSizeBytes = request.TargetBundleSizeBytes,
-                    ChunkSizeBytes = request.ChunkSizeBytes,
-                    Status = "InProgress"
-                };
-                await _manifestStorage.SaveAsync(manifest, manifestPath, cancellationToken);
-            }
+            Directory.CreateDirectory(scratchJobDirectory);
+
+            var manifest = await LoadOrCreateManifestAsync(
+                request,
+                localManifestPath,
+                destinationManifestPath,
+                cancellationToken).ConfigureAwait(false);
 
             var rootKeyRecord = _vaultService.GetOrCreateRootKey(request.UserSession, request.SourceRoot);
             var rootKey = _vaultService.UnwrapRootKey(rootKeyRecord, request.UserSession);
@@ -72,73 +64,56 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                     files = _fileScanner.ScanFiles(request.SourceRoot, request.IncludedFullPaths);
                 }
                 var plannedBundles = _bundlePlanner.PlanBundles(files, request.TargetBundleSizeBytes);
-                var bundleList = new List<PlannedBundle>(plannedBundles);
 
-                var totalBytes = 0L;
-                foreach (var plannedBundle in bundleList)
-                {
-                    totalBytes += plannedBundle.TotalPlaintextBytes;
-                }
-
-                var totalBundles = bundleList.Count;
-
-                // When resuming, treat bundles that are already fully completed as processed so far.
                 long processedBytes = 0;
-                foreach (var plannedBundle in bundleList)
-                {
-                    if (IsBundleCompleted(manifest, request.DestinationRoot, plannedBundle))
-                    {
-                        processedBytes += plannedBundle.TotalPlaintextBytes;
-                    }
-                }
-
                 var bundleIndex = 0;
-                foreach (var plannedBundle in bundleList)
+                foreach (var plannedBundle in plannedBundles)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    // Skip bundles that are already present and recorded as completed.
-                    if (IsBundleCompleted(manifest, request.DestinationRoot, plannedBundle))
+                    var existingBundle = FindBundle(manifest, plannedBundle.BundleIndex);
+                    if (await TryHandleExistingBundleAsync(
+                        request,
+                        manifest,
+                        existingBundle,
+                        plannedBundle,
+                        scratchJobDirectory,
+                        localManifestPath,
+                        progress,
+                        processedBytes,
+                        bundleIndex + 1,
+                        cancellationToken).ConfigureAwait(false))
                     {
+                        processedBytes += plannedBundle.TotalPlaintextBytes;
                         bundleIndex++;
                         continue;
                     }
 
                     var currentBundleIndex = bundleIndex + 1;
 
-                    // Report a snapshot before starting the bundle, if totals are known.
-                    if (totalBytes > 0 && progress != null)
-                    {
-                        progress.Report(new BackupProgress
-                        {
-                            Phase = "Encrypting",
-                            ProcessedBytes = processedBytes,
-                            TotalBytes = totalBytes,
-                            CurrentBundleIndex = currentBundleIndex,
-                            TotalBundles = totalBundles,
-                            CurrentItemName = $"bundle_{plannedBundle.BundleIndex:D4}"
-                        });
-                    }
-
                     var bundleInfo = await EncryptBundleAsync(
                         request,
                         rootKey,
                         plannedBundle,
-                        totalBytes,
+                        scratchJobDirectory,
                         processedBytes,
                         currentBundleIndex,
-                        totalBundles,
                         progress,
                         cancellationToken).ConfigureAwait(false);
-                    manifest.Bundles.Add(bundleInfo);
-                    await _manifestStorage.SaveAsync(manifest, manifestPath, cancellationToken).ConfigureAwait(false);
+
+                    ReplaceBundle(manifest, bundleInfo);
+                    await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
+                    await PublishBundleToDestinationAsync(request, scratchJobDirectory, bundleInfo, cancellationToken).ConfigureAwait(false);
+                    bundleInfo.IsPublished = true;
+                    await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
 
                     processedBytes += plannedBundle.TotalPlaintextBytes;
                     bundleIndex++;
                 }
 
                 manifest.Status = "Completed";
-                await _manifestStorage.SaveAsync(manifest, manifestPath, cancellationToken).ConfigureAwait(false);
+                await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
+                await PublishManifestToDestinationAsync(manifest, destinationManifestPath, cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -148,41 +123,118 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             return manifest;
         }
 
-        private bool IsBundleCompleted(BackupJobManifest manifest, string destinationRoot, PlannedBundle plannedBundle)
+        private static string GetScratchJobDirectory(string scratchRoot, string jobId)
         {
-            foreach (var existing in manifest.Bundles)
+            return Path.Combine(scratchRoot, "jobs", jobId);
+        }
+
+        private async Task<BackupJobManifest> LoadOrCreateManifestAsync(
+            BackupJobEncryptRequest request,
+            string localManifestPath,
+            string destinationManifestPath,
+            CancellationToken cancellationToken)
+        {
+            if (File.Exists(localManifestPath))
             {
-                if (existing.BundleIndex != plannedBundle.BundleIndex)
-                {
-                    continue;
-                }
+                return await _manifestStorage.LoadAsync(localManifestPath, cancellationToken).ConfigureAwait(false);
+            }
 
-                var bundlePath = Path.Combine(destinationRoot, existing.BundleFileName);
-                if (!File.Exists(bundlePath))
-                {
-                    return false;
-                }
+            if (File.Exists(destinationManifestPath))
+            {
+                var manifest = await _manifestStorage.LoadAsync(destinationManifestPath, cancellationToken).ConfigureAwait(false);
+                await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
+                return manifest;
+            }
 
-                var info = new FileInfo(bundlePath);
-                if (info.Length != existing.BundleFileSizeBytes)
-                {
-                    return false;
-                }
+            var newManifest = new BackupJobManifest
+            {
+                JobId = request.JobId,
+                SourceRoot = request.SourceRoot,
+                CreatedUtc = DateTime.UtcNow,
+                BundleTargetSizeBytes = request.TargetBundleSizeBytes,
+                ChunkSizeBytes = request.ChunkSizeBytes,
+                Status = "InProgress"
+            };
 
+            await _manifestStorage.SaveAsync(newManifest, localManifestPath, cancellationToken).ConfigureAwait(false);
+            return newManifest;
+        }
+
+        private static BackupBundleInfo? FindBundle(BackupJobManifest manifest, int bundleIndex)
+        {
+            return manifest.Bundles.FirstOrDefault(bundle => bundle.BundleIndex == bundleIndex);
+        }
+
+        private static void ReplaceBundle(BackupJobManifest manifest, BackupBundleInfo bundleInfo)
+        {
+            manifest.Bundles.RemoveAll(bundle => bundle.BundleIndex == bundleInfo.BundleIndex);
+            manifest.Bundles.Add(bundleInfo);
+            manifest.Bundles.Sort((left, right) => left.BundleIndex.CompareTo(right.BundleIndex));
+        }
+
+        private async Task<bool> TryHandleExistingBundleAsync(
+            BackupJobEncryptRequest request,
+            BackupJobManifest manifest,
+            BackupBundleInfo? existingBundle,
+            PlannedBundle plannedBundle,
+            string scratchJobDirectory,
+            string localManifestPath,
+            IProgress<BackupProgress>? progress,
+            long processedBytesBase,
+            int currentBundleIndex,
+            CancellationToken cancellationToken)
+        {
+            if (existingBundle == null)
+            {
+                return false;
+            }
+
+            existingBundle.TotalPlaintextBytes = plannedBundle.TotalPlaintextBytes;
+
+            var localBundlePath = Path.Combine(scratchJobDirectory, existingBundle.BundleFileName);
+            var destinationBundlePath = Path.Combine(request.DestinationRoot, existingBundle.BundleFileName);
+            var hasValidLocalBundle = IsBundleFileValid(localBundlePath, existingBundle.BundleFileSizeBytes);
+            var hasValidPublishedBundle = IsBundleFileValid(destinationBundlePath, existingBundle.BundleFileSizeBytes);
+
+            if (existingBundle.IsPublished && hasValidPublishedBundle)
+            {
+                ReportBundleState(progress, processedBytesBase, currentBundleIndex, plannedBundle.BundleIndex, "Encrypting");
                 return true;
             }
 
+            if (hasValidLocalBundle)
+            {
+                await PublishBundleToDestinationAsync(request, scratchJobDirectory, existingBundle, cancellationToken).ConfigureAwait(false);
+                existingBundle.IsPublished = true;
+                await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
+                ReportBundleState(progress, processedBytesBase, currentBundleIndex, plannedBundle.BundleIndex, "Publishing");
+                return true;
+            }
+
+            existingBundle.IsPublished = false;
+            manifest.Bundles.RemoveAll(bundle => bundle.BundleIndex == plannedBundle.BundleIndex);
+            await _manifestStorage.SaveAsync(manifest, localManifestPath, cancellationToken).ConfigureAwait(false);
             return false;
+        }
+
+        private static bool IsBundleFileValid(string path, long expectedLength)
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            var info = new FileInfo(path);
+            return info.Length == expectedLength;
         }
 
         private async Task<BackupBundleInfo> EncryptBundleAsync(
             BackupJobEncryptRequest request,
             byte[] rootKey,
             PlannedBundle plannedBundle,
-            long totalBytes,
+            string scratchJobDirectory,
             long processedBytesBase,
             int currentBundleIndex,
-            int totalBundles,
             IProgress<BackupProgress>? progress,
             CancellationToken cancellationToken)
         {
@@ -191,10 +243,10 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             try
             {
                 var bundleFileName = $"bundle_{plannedBundle.BundleIndex:D4}{BundleFileExtension}";
-                var finalPath = Path.Combine(request.DestinationRoot, bundleFileName);
+                var finalPath = Path.Combine(scratchJobDirectory, bundleFileName);
                 var tempPath = finalPath + ".part";
 
-                Directory.CreateDirectory(request.DestinationRoot);
+                Directory.CreateDirectory(scratchJobDirectory);
 
                 if (File.Exists(tempPath))
                 {
@@ -255,7 +307,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
 
                             bundleProcessed += bytesRead;
 
-                            if (totalBytes > 0 && progress != null)
+                            if (progress != null)
                             {
                                 var currentProcessed = processedBytesBase + bundleProcessed;
 
@@ -263,9 +315,9 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
                                 {
                                     Phase = "Encrypting",
                                     ProcessedBytes = currentProcessed,
-                                    TotalBytes = totalBytes,
+                                    TotalBytes = 0,
                                     CurrentBundleIndex = currentBundleIndex,
-                                    TotalBundles = totalBundles,
+                                    TotalBundles = 0,
                                     CurrentItemName = entry.File.RelativePath
                                 });
                             }
@@ -329,6 +381,68 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
             Buffer.BlockCopy(counterBytes, 0, nonce, prefix.Length, 4);
             return nonce;
         }
+
+        private async Task PublishBundleToDestinationAsync(
+            BackupJobEncryptRequest request,
+            string scratchJobDirectory,
+            BackupBundleInfo bundleInfo,
+            CancellationToken cancellationToken)
+        {
+            Directory.CreateDirectory(request.DestinationRoot);
+
+            var sourcePath = Path.Combine(scratchJobDirectory, bundleInfo.BundleFileName);
+            var destinationPath = Path.Combine(request.DestinationRoot, bundleInfo.BundleFileName);
+            var tempDestinationPath = destinationPath + ".part";
+
+            if (File.Exists(tempDestinationPath))
+            {
+                File.Delete(tempDestinationPath);
+            }
+
+            await using (var sourceStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            await using (var destinationStream = new FileStream(tempDestinationPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await sourceStream.CopyToAsync(destinationStream, 81920, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (File.Exists(destinationPath))
+            {
+                File.Delete(destinationPath);
+            }
+
+            File.Move(tempDestinationPath, destinationPath);
+            _logger.Log($"Published bundle {bundleInfo.BundleFileName} for job {request.JobId}.");
+        }
+
+        private async Task PublishManifestToDestinationAsync(BackupJobManifest manifest, string destinationManifestPath, CancellationToken cancellationToken)
+        {
+            var destinationDirectory = Path.GetDirectoryName(destinationManifestPath);
+            if (!string.IsNullOrEmpty(destinationDirectory))
+            {
+                Directory.CreateDirectory(destinationDirectory);
+            }
+
+            await _manifestStorage.SaveAsync(manifest, destinationManifestPath, cancellationToken).ConfigureAwait(false);
+            _logger.Log($"Published final manifest for job {manifest.JobId}.");
+        }
+
+        private static void ReportBundleState(IProgress<BackupProgress>? progress, long processedBytesBase, int currentBundleIndex, int bundleIndex, string phase)
+        {
+            if (progress == null)
+            {
+                return;
+            }
+
+            progress.Report(new BackupProgress
+            {
+                Phase = phase,
+                ProcessedBytes = processedBytesBase,
+                TotalBytes = 0,
+                CurrentBundleIndex = currentBundleIndex,
+                TotalBundles = 0,
+                CurrentItemName = $"bundle_{bundleIndex:D4}"
+            });
+        }
     }
 
     public class BackupJobEncryptRequest
@@ -336,6 +450,7 @@ namespace BackupVaultEncryptor.App.Core.BackupEngine
         public string JobId { get; set; } = Guid.NewGuid().ToString();
         public string SourceRoot { get; set; } = string.Empty;
         public string DestinationRoot { get; set; } = string.Empty;
+        public string ScratchRoot { get; set; } = string.Empty;
         public long TargetBundleSizeBytes { get; set; }
         public int ChunkSizeBytes { get; set; }
         public UserSession UserSession { get; set; } = null!;

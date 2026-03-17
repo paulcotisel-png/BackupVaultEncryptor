@@ -54,6 +54,7 @@ public partial class MainWindow : Window
 
         BundleSizeGiBTextBox.Text = bundleGiB.ToString("0.##", CultureInfo.InvariantCulture);
         ChunkSizeMiBTextBox.Text = chunkMiB.ToString("0.##", CultureInfo.InvariantCulture);
+        ScratchPathTextBox.Text = settings.ScratchPath;
     }
 
     private void EncryptBrowseSourceButton_Click(object sender, RoutedEventArgs e)
@@ -120,6 +121,16 @@ public partial class MainWindow : Window
         if (result == true && !string.IsNullOrEmpty(dialog.FolderName))
         {
             DecryptDestinationTextBox.Text = dialog.FolderName;
+        }
+    }
+
+    private void ScratchPathBrowseButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog();
+        var result = dialog.ShowDialog();
+        if (result == true && !string.IsNullOrEmpty(dialog.FolderName))
+        {
+            ScratchPathTextBox.Text = dialog.FolderName;
         }
     }
 
@@ -245,12 +256,17 @@ public partial class MainWindow : Window
 
         var jobId = Guid.NewGuid().ToString();
         var jobOutputRoot = destinationRoot;
+        var scratchRoot = ResolveScratchRoot();
+        if (scratchRoot == null)
+        {
+            return;
+        }
 
         _currentJobCts?.Dispose();
         _currentJobCts = new CancellationTokenSource();
 
-        SetJobRunningState(true, "Scanning and planning...");
-        AppendMainLogLine($"[Encrypt] Job {jobId} started. Source: {sourcePath}, Destination: {destinationRoot}");
+        SetJobRunningState(true, "Preparing local scratch and streaming encryption...");
+        AppendMainLogLine($"[Encrypt] Job {jobId} started. Source: {sourcePath}, Destination: {destinationRoot}, Scratch: {scratchRoot}");
 
         try
         {
@@ -259,6 +275,7 @@ public partial class MainWindow : Window
                 JobId = jobId,
                 SourceRoot = sourceRoot,
                 DestinationRoot = jobOutputRoot,
+                ScratchRoot = scratchRoot,
                 TargetBundleSizeBytes = settings.BundleTargetSizeBytes,
                 ChunkSizeBytes = settings.ChunkSizeBytes,
                 UserSession = _appState.CurrentSession!,
@@ -280,7 +297,7 @@ public partial class MainWindow : Window
             AppendMainLogLine($"[Encrypt] Job {jobId} canceled by user.");
 
             // Best-effort cleanup of artifacts for this canceled encrypt job only.
-            await CleanupCanceledEncryptJobAsync(jobId, jobOutputRoot, destinationCreatedByApp);
+            await CleanupCanceledEncryptJobAsync(jobId, jobOutputRoot, scratchRoot, destinationCreatedByApp);
         }
         catch (Exception ex)
         {
@@ -308,9 +325,11 @@ public partial class MainWindow : Window
     /// wildcards across the whole destination. Failures are logged but do not
     /// turn cancel into an error path.
     /// </summary>
-    private async Task CleanupCanceledEncryptJobAsync(string jobId, string destinationRoot, bool destinationCreatedByApp)
+    private async Task CleanupCanceledEncryptJobAsync(string jobId, string destinationRoot, string scratchRoot, bool destinationCreatedByApp)
     {
         var manifestPath = Path.Combine(destinationRoot, $"{jobId}_manifest.json");
+        var scratchJobDirectory = Path.Combine(scratchRoot, "jobs", jobId);
+        var localManifestPath = Path.Combine(scratchJobDirectory, $"{jobId}_manifest.json");
         var manifestStorage = new ManifestStorage();
 
         BackupVaultEncryptor.App.Core.Models.BackupJobManifest? manifest = null;
@@ -321,7 +340,16 @@ public partial class MainWindow : Window
         // clean up what we can without throwing.
         try
         {
-            if (File.Exists(manifestPath))
+            if (File.Exists(localManifestPath))
+            {
+                manifest = await manifestStorage.LoadAsync(localManifestPath, CancellationToken.None);
+                if (manifest != null)
+                {
+                    manifestLoaded = true;
+                    completedBundles = manifest.Bundles.Count;
+                }
+            }
+            else if (File.Exists(manifestPath))
             {
                 manifest = await manifestStorage.LoadAsync(manifestPath, CancellationToken.None);
                 if (manifest != null)
@@ -344,9 +372,13 @@ public partial class MainWindow : Window
             {
                 var bundlePath = Path.Combine(destinationRoot, bundle.BundleFileName);
                 var bundlePartPath = bundlePath + ".part";
+                var scratchBundlePath = Path.Combine(scratchJobDirectory, bundle.BundleFileName);
+                var scratchBundlePartPath = scratchBundlePath + ".part";
 
                 TryDeleteFile(bundlePath, $"bundle file {bundle.BundleFileName} for canceled job {jobId}");
                 TryDeleteFile(bundlePartPath, $"bundle temp file {Path.GetFileName(bundlePartPath)} for canceled job {jobId}");
+                TryDeleteFile(scratchBundlePath, $"scratch bundle file {bundle.BundleFileName} for canceled job {jobId}");
+                TryDeleteFile(scratchBundlePartPath, $"scratch bundle temp file {Path.GetFileName(scratchBundlePartPath)} for canceled job {jobId}");
             }
         }
 
@@ -356,10 +388,25 @@ public partial class MainWindow : Window
         // and we will only touch bundle_0000.benc.part.
         var inferredTempFileName = $"bundle_{completedBundles:D4}.benc.part";
         var inferredTempPath = Path.Combine(destinationRoot, inferredTempFileName);
+        var inferredScratchTempPath = Path.Combine(scratchJobDirectory, inferredTempFileName);
         TryDeleteFile(inferredTempPath, $"inferred current temp bundle {inferredTempFileName} for canceled job {jobId}");
+        TryDeleteFile(inferredScratchTempPath, $"inferred scratch temp bundle {inferredTempFileName} for canceled job {jobId}");
 
         // Finally, delete the manifest file itself for this job.
         TryDeleteFile(manifestPath, $"manifest for canceled job {jobId}");
+        TryDeleteFile(localManifestPath, $"local manifest for canceled job {jobId}");
+
+        try
+        {
+            if (Directory.Exists(scratchJobDirectory) && !Directory.EnumerateFileSystemEntries(scratchJobDirectory).Any())
+            {
+                Directory.Delete(scratchJobDirectory);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Log($"Cleanup: failed to delete scratch job directory '{scratchJobDirectory}' for canceled job {jobId}: {ex.Message}");
+        }
 
         // Optionally delete the destination folder if we know it was created
         // by this encrypt run and it is now empty after artifact cleanup.
@@ -472,6 +519,7 @@ public partial class MainWindow : Window
 
         _appState.CurrentSettings.BundleTargetSizeBytes = bundleBytes;
         _appState.CurrentSettings.ChunkSizeBytes = chunkBytes;
+        _appState.CurrentSettings.ScratchPath = ScratchPathTextBox.Text?.Trim() ?? string.Empty;
         _settingsStore.Save(_appState.CurrentSettings);
 
         MessageBox.Show(this, "Settings saved.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -504,6 +552,45 @@ public partial class MainWindow : Window
         }
 
         return true;
+    }
+
+    private string? ResolveScratchRoot()
+    {
+        var configuredScratchPath = ScratchPathTextBox.Text?.Trim() ?? string.Empty;
+        var resolvedScratchPath = string.IsNullOrWhiteSpace(configuredScratchPath)
+            ? _settingsStore.GetDefaultScratchPath()
+            : configuredScratchPath;
+
+        if (IsUncPath(resolvedScratchPath))
+        {
+            var result = MessageBox.Show(
+                this,
+                "The selected scratch path is a network/UNC path. This reduces the SMB benefit of local scratch output. Continue anyway?",
+                "Scratch path warning",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+            {
+                return null;
+            }
+        }
+
+        try
+        {
+            Directory.CreateDirectory(resolvedScratchPath);
+            return resolvedScratchPath;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Failed to prepare scratch folder: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            return null;
+        }
+    }
+
+    private static bool IsUncPath(string path)
+    {
+        return path.StartsWith("\\\\", StringComparison.OrdinalIgnoreCase);
     }
 
     private void SetJobRunningState(bool isRunning, string? status)
@@ -542,6 +629,11 @@ public partial class MainWindow : Window
         if (DecryptBrowseDestinationButton != null)
         {
             DecryptBrowseDestinationButton.IsEnabled = !isRunning;
+        }
+
+        if (ScratchPathBrowseButton != null)
+        {
+            ScratchPathBrowseButton.IsEnabled = !isRunning;
         }
 
         if (CancelJobButton != null)

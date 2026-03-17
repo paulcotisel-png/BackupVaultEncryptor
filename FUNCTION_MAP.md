@@ -103,7 +103,7 @@ WPF project skeleton with initial configuration, logging, and local SQLite boots
     - `Task SaveAsync(BackupJobManifest manifest, string manifestPath, CancellationToken ct)` writes manifest JSON
     - `Task<BackupJobManifest> LoadAsync(string manifestPath, CancellationToken ct)` reads manifest JSON
   - `BundleEncryptor`
-    - `Task<BackupJobManifest> EncryptAsync(BackupJobEncryptRequest request, IProgress<BackupProgress>? progress = null, CancellationToken ct = default)` scans files, plans bundles, writes chunked AES-GCM bundle files + manifest, and optionally reports byte-based progress across bundles
+    - `Task<BackupJobManifest> EncryptAsync(BackupJobEncryptRequest request, IProgress<BackupProgress>? progress = null, CancellationToken ct = default)` scans files, plans bundles sequentially, writes chunked AES-GCM bundle files into a local scratch job folder, keeps the in-progress manifest local, publishes completed bundle files to the destination, and publishes the final manifest at job completion
   - `BundleDecryptor`
     - `Task DecryptAsync(BackupJobDecryptRequest request, IProgress<BackupProgress>? progress = null, CancellationToken ct = default)` reads manifest and restores original folder/file structure from bundles, optionally reporting byte-based progress across bundles
   - `BackupProgress`

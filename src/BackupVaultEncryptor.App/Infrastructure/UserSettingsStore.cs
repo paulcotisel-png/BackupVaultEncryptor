@@ -67,5 +67,21 @@ namespace BackupVaultEncryptor.App.Infrastructure
             var json = JsonSerializer.Serialize(settings, SerializerOptions);
             File.WriteAllText(path, json);
         }
+
+        public string GetDefaultScratchPath()
+        {
+            var dataDirectory = _config.AppDataDirectory;
+            if (string.IsNullOrWhiteSpace(dataDirectory))
+            {
+                dataDirectory = "AppData";
+            }
+
+            if (!Path.IsPathRooted(dataDirectory))
+            {
+                dataDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, dataDirectory);
+            }
+
+            return Path.Combine(dataDirectory, "Scratch");
+        }
     }
 }

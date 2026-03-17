@@ -27,6 +27,7 @@ namespace BackupVaultEncryptor.App.Core.Models
         public string BundleFileName { get; set; } = string.Empty;
         public long TotalPlaintextBytes { get; set; }
         public long BundleFileSizeBytes { get; set; }
+        public bool IsPublished { get; set; }
         public List<BackupBundleEntry> Entries { get; set; } = new List<BackupBundleEntry>();
     }
 

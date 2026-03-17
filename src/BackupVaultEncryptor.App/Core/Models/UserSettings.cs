@@ -8,5 +8,6 @@ namespace BackupVaultEncryptor.App.Core.Models
     {
         public long BundleTargetSizeBytes { get; set; } = 4L * 1024 * 1024 * 1024; // default 4 GiB
         public int ChunkSizeBytes { get; set; } = 8 * 1024 * 1024; // default 8 MiB
+        public string ScratchPath { get; set; } = string.Empty;
     }
 }
